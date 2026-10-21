@@ -18,7 +18,7 @@ TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
-app = FastAPI(title="NEXUS-2070 // Viral Core", version="20.70.6")
+app = FastAPI(title="NEXUS-2070 // Viral Core", version="20.70.7")
 
 # -----------------------------------------------------------------------------
 # [2] ENDPOINTS
@@ -36,14 +36,19 @@ async def generar_tendencias():
                 content={"status": "ERROR", "detail": "Faltan credenciales en el entorno."}
             )
 
-        # Prompt optimizado y corregido (sin errores de sintaxis)
+        # Prompt blindado (Anti-Shadowban)
         prompt = (
-            "Genera 3 guiones hipersensacionalistas para TikTok/Reels. "
-            "Estructura estricta para cada uno:\n"
-            "1. GANCHO (Frase exacta para decir en los primeros 3 segundos, máxima curiosidad).\n"
-            "2. CUERPO (Máximo 5 líneas cortas, directas, para leer en pantalla o decir rápido).\n"
-            "3. CTA (Llamado a la acción magnético).\n"
-            "Separa cada guion con la marca '》》》》》'. No uses asteriscos ni guiones bajos."
+            "Genera 3 guiones altamente virales para TikTok/Reels usando psicología de retención "
+            "(Curiosity Gap, FOMO y Storytelling), pero SIN violar las normas de la comunidad.\n\n"
+            "REGLAS DE ORO:\n"
+            "- PROHIBIDO prometer resultados médicos reales o curas milagrosas.\n"
+            "- PROHIBIDO prometer riquezas garantizadas o dinero fácil.\n"
+            "- Usa el morbo, los secretos de la industria, o datos históricos sorprendentes.\n\n"
+            "ESTRUCTURA POR GUION:\n"
+            "1. GANCHO (Frase exacta de 3 segundos, máxima curiosidad).\n"
+            "2. CUERPO (5 líneas cortas para subtítulos dinámicos).\n"
+            "3. CTA (Llamado a la acción magnético).\n\n"
+            "Separa cada guion EXACTAMENTE con la marca '》》》》》'. No uses asteriscos ni guiones bajos."
         )
 
         headers = {
@@ -64,7 +69,7 @@ async def generar_tendencias():
                 }
             ],
             "temperature": 0.8,
-            "max_tokens": 2048  # Aumentado para evitar respuestas vacías del modelo 120b
+            "max_tokens": 2048
         }
 
         log.info("[FLOW] Enviando petición a Groq...")
@@ -83,7 +88,7 @@ async def generar_tendencias():
         if not ai_text:
             raise ValueError("Groq devolvió una respuesta vacía.")
 
-        # Limpieza de Markdown para evitar que Telegram rechace el mensaje
+        # Limpieza y envío a Telegram
         telegram_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         safe_text = ai_text.replace("*", "").replace("_", "").replace("`", "")
         
@@ -98,7 +103,11 @@ async def generar_tendencias():
         tg_resp.raise_for_status()
 
         log.info("[FLOW] ¡Éxito total!")
-        return {"status": "SUCCESS", "model_used": GROQ_MODEL, "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        return {
+            "status": "SUCCESS", 
+            "model_used": GROQ_MODEL, 
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
 
     except requests.exceptions.Timeout:
         log.error("[FLOW] Timeout: La petición tardó demasiado.")
