@@ -1,24 +1,24 @@
 # =============================================================================
-# NEXUS-2070 :: CORE DE GENERACIÓN VIRAL AUTÓNOMA
+# NEXUS-2070 // VIRAL CORE :: main.py
 # -----------------------------------------------------------------------------
-# Arquitectura : FastAPI + Groq LLaMA 3.3 70B + Telegram Bot API
-# Runtime      : Gunicorn + UvicornWorker (Render)
-# Autor        : Ing. Principal de Sistemas Autónomos (2070)
-# Garantía     : Zero-Crash · Fail-Safe · Telemetría Estructurada
+# Stack     : FastAPI + Groq (llama-3.3-70b-versatile) + Telegram Bot API
+# Runtime   : Gunicorn + UvicornWorker (Render)
+# Garantía  : Zero-Crash · Fail-Safe · Errores HTTP controlados
 # =============================================================================
 
 import os
+import time
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 # -----------------------------------------------------------------------------
-# [0] BOOTSTRAP :: Carga de entorno y logging estructurado
+# [0] BOOTSTRAP
 # -----------------------------------------------------------------------------
 load_dotenv()
 
@@ -30,78 +30,79 @@ logging.basicConfig(
 log = logging.getLogger("nexus")
 
 # -----------------------------------------------------------------------------
-# [1] CONFIGURACIÓN :: Validación estricta con modo degradado (nunca crash)
+# [1] CONFIG :: lectura segura con degradación controlada
 # -----------------------------------------------------------------------------
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
-TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "").strip()
-TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+GROQ_API_KEY: str = (os.getenv("GROQ_API_KEY") or "").strip()
+TELEGRAM_TOKEN: str = (os.getenv("TELEGRAM_TOKEN") or "").strip()
+TELEGRAM_CHAT_ID: str = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 
-GROQ_ENDPOINT: str = "https://api.groq.com/v1/chat/completions"
+GROQ_ENDPOINT: str = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL: str = "llama-3.3-70b-versatile"
-TELEGRAM_TIMEOUT: int = 15
+TELEGRAM_API: str = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage" if TELEGRAM_TOKEN else ""
+
 GROQ_TIMEOUT: int = 45
+TELEGRAM_TIMEOUT: int = 15
+MAX_TELEGRAM_LEN: int = 4096  # límite duro de Telegram
 
 
-def _validate_environment() -> Dict[str, bool]:
-    """Diagnóstico no bloqueante: el sistema arranca siempre, reporta carencias."""
-    status = {
+def _env_report() -> Dict[str, bool]:
+    return {
         "groq": bool(GROQ_API_KEY),
         "telegram_token": bool(TELEGRAM_TOKEN),
         "telegram_chat": bool(TELEGRAM_CHAT_ID),
     }
-    for k, ok in status.items():
-        log.info(f"[ENV] {k:<16} :: {'ONLINE' if ok else 'MISSING'}")
-    return status
 
 
-ENV_STATUS = _validate_environment()
+ENV_STATUS = _env_report()
 
 # -----------------------------------------------------------------------------
-# [2] FASTAPI :: Instancia con metadatos ciber-futuristas
+# [2] APP
 # -----------------------------------------------------------------------------
 app = FastAPI(
     title="NEXUS-2070 // Viral Core",
-    description="Sistema autónomo de generación predictiva de contenido viral.",
-    version="20.70.0",
+    description="Generador autónomo de guiones virales para Shorts/Reels/TikTok.",
+    version="20.70.2",
 )
 
 
-# -----------------------------------------------------------------------------
-# [3] UTILIDADES INTERNAS
-# -----------------------------------------------------------------------------
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _build_groq_prompt() -> str:
-    """Prompt maestro: neuro-persuasión + guiones optimizados para subtítulos."""
+# -----------------------------------------------------------------------------
+# [3] PROMPT MAESTRO
+# -----------------------------------------------------------------------------
+def _build_prompt() -> str:
     return (
-        "Eres un estratega de contenido viral del año 2070, especializado en "
-        "neuro-persuasión y predicción algorítmica de tendencias. "
-        "Analiza y predice las 3 tendencias globales MÁS EXPLOSIVAS de HOY "
-        "en 3 nichos virales DIFERENTES entre sí (elige entre: cocina, "
-        "tecnología, datos curiosos, misterio, finanzas, fitness, viajes). "
-        "\n\nREGLAS ESTRICTAS DE FORMATO POR NICHO:\n"
-        "1. Encabezado: nicho + emoji táctico.\n"
-        "2. GANCHO NEURO-PERSUASIVO de 3 segundos (una sola línea, impacto máximo).\n"
-        "3. DESARROLLO: exactamente 5 frases ULTRA-CORTAS (máx 8 palabras cada una), "
-        "diseñadas para subtítulos automáticos tipo Shorts/Reels/TikTok.\n"
-        "4. CTA MAGNÉTICO: una sola línea, alta conversión.\n"
-        "5. HASHTAGS: 4 hashtags virales separados por espacio.\n"
-        "\nSepara cada nicho con el marcador exacto: '---'.\n"
-        "NO uses markdown complejo, NO uses tablas. Texto plano estructurado."
+        "Actúa como estratega senior de contenido viral. "
+        "Genera EXACTAMENTE 3 guiones virales para Shorts/Reels/TikTok, "
+        "cada uno de un nicho DIFERENTE (elige entre: cocina, tecnología, "
+        "datos curiosos, misterio, finanzas, fitness, viajes, historia).\n\n"
+        "ESTRUCTURA OBLIGATORIA por guion:\n"
+        "• TITULO: nombre corto del guion (máx 8 palabras).\n"
+        "• NICHO: categoría.\n"
+        "• GANCHO: una sola frase de MÁXIMO 3 segundos al aire (potente, neuro-persuasiva).\n"
+        "• CUERPO: exactamente 5 líneas ultra-cortas (máx 8 palabras cada una), "
+        "pensadas para subtítulos dinámicos, una idea por línea.\n"
+        "• CTA: una sola frase magnética de cierre.\n\n"
+        "FORMATO DE SALIDA (crítico):\n"
+        "- Usa el marcador literal '@@@' entre guiones.\n"
+        "- Usa etiquetas en MAYÚSCULAS con dos puntos (TITULO:, NICHO:, GANCHO:, CUERPO:, CTA:).\n"
+        "- NADA de markdown complejo, nada de tablas, nada de numeración extra.\n"
+        "- Español neutro, tono directo, cero relleno."
     )
 
 
-def _sanitize_telegram(text: str) -> str:
-    """Convierte marcadores de sección en separadores visuales futuristas."""
-    return text.replace("---", "\n━━━━━━━━━━━━━━━━━━━━━━\n").strip()
+# -----------------------------------------------------------------------------
+# [4] CLIENTE GROQ :: reintentos + parseo defensivo
+# -----------------------------------------------------------------------------
+class GroqError(Exception):
+    """Error controlado del proveedor Groq."""
 
 
-def _call_groq() -> str:
-    """Petición HTTP optimizada a Groq. Lanza excepción controlada si falla."""
+def _call_groq(retries: int = 2) -> str:
     if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY ausente en el entorno.")
+        raise GroqError("GROQ_API_KEY no configurada en el entorno.")
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -110,43 +111,113 @@ def _call_groq() -> str:
     payload = {
         "model": GROQ_MODEL,
         "messages": [
-            {
-                "role": "system",
-                "content": "Responde SIEMPRE en español, tono futurista, directo, sin relleno.",
-            },
-            {"role": "user", "content": _build_groq_prompt()},
+            {"role": "system", "content": "Responde en español, tono directo, sin markdown complejo."},
+            {"role": "user", "content": _build_prompt()},
         ],
         "temperature": 0.85,
-        "max_tokens": 1400,
         "top_p": 0.95,
+        "max_tokens": 1600,
         "stream": False,
     }
 
-    try:
-        resp = requests.post(
-            GROQ_ENDPOINT, headers=headers, json=payload, timeout=GROQ_TIMEOUT
+    last_err: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.post(
+                GROQ_ENDPOINT,
+                headers=headers,
+                json=payload,
+                timeout=GROQ_TIMEOUT,
+            )
+            if resp.status_code == 401:
+                raise GroqError("Groq rechazó la API key (401).")
+            if resp.status_code == 429:
+                raise GroqError("Rate limit de Groq alcanzado (429).")
+            resp.raise_for_status()
+
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            if not content or not content.strip():
+                raise GroqError("Groq devolvió contenido vacío.")
+
+            log.info(f"[GROQ] OK attempt={attempt} chars={len(content)}")
+            return content.strip()
+
+        except requests.exceptions.Timeout as e:
+            last_err = GroqError(f"Timeout Groq ({GROQ_TIMEOUT}s).")
+            log.warning(f"[GROQ] timeout attempt={attempt}")
+        except requests.exceptions.RequestException as e:
+            last_err = GroqError(f"Error de red Groq: {e}")
+            log.warning(f"[GROQ] network attempt={attempt} :: {e}")
+        except (KeyError, IndexError, ValueError) as e:
+            raise GroqError(f"Respuesta Groq malformada: {e}")
+
+        if attempt < retries:
+            time.sleep(1.5 * attempt)
+
+    raise last_err or GroqError("Fallo desconocido en Groq.")
+
+
+# -----------------------------------------------------------------------------
+# [5] FORMATEO TELEGRAM :: Markdown de alto impacto
+# -----------------------------------------------------------------------------
+def _sanitize_md(text: str) -> str:
+    """Evita romper el parse_mode=Markdown (solo escapa lo crítico)."""
+    return (
+        text.replace("_", r"\_")
+            .replace("*", r"\*")
+            .replace("`", r"\`")
+            .replace("[", r"\[")
+    )
+
+
+def _format_for_telegram(ai_text: str) -> str:
+    guiones = [g.strip() for g in ai_text.split("@@@") if g.strip()]
+    if not guiones:
+        guiones = [ai_text.strip()]
+
+    blocks = []
+    for idx, g in enumerate(guiones[:3], start=1):
+        safe = _sanitize_md(g)
+        blocks.append(
+            f"*🎬 GUION {idx}*\n"
+            f"```\n{safe}\n```"
         )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-        if not content or not content.strip():
-            raise RuntimeError("Groq devolvió contenido vacío.")
-        return content.strip()
-    except requests.exceptions.Timeout:
-        raise RuntimeError("Timeout al contactar Groq (>45s).")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"Fallo de red con Groq: {e}")
-    except (KeyError, IndexError, ValueError) as e:
-        raise RuntimeError(f"Respuesta Groq malformada: {e}")
+
+    header = (
+        "╔══════════════════════════════╗\n"
+        "║ *NEXUS-2070 // VIRAL FEED* ║\n"
+        "╚══════════════════════════════╝\n\n"
+        f"🛰️ *Timestamp:* `{_utc_now()}`\n"
+        f"🧠 *Motor:* `{GROQ_MODEL}`\n"
+        "⚡ *Modo:* AUTÓNOMO\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    footer = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔻 _NEXUS-2070 · Zero-Human-in-the-Loop_"
+
+    msg = header + "\n\n".join(blocks) + footer
+
+    # Guardarraíl de longitud Telegram
+    if len(msg) > MAX_TELEGRAM_LEN:
+        msg = msg[: MAX_TELEGRAM_LEN - 20] + "\n…[truncado]"
+    return msg
 
 
-def _send_telegram(message: str) -> bool:
-    """Envío a Telegram. Devuelve True/False sin propagar excepción."""
+# -----------------------------------------------------------------------------
+# [6] CLIENTE TELEGRAM
+# -----------------------------------------------------------------------------
+class TelegramError(Exception):
+    """Error controlado del envío a Telegram."""
+
+
+def _send_telegram(message: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        log.warning("[TELEGRAM] Credenciales incompletas :: skip")
-        return False
+        raise TelegramError("Credenciales de Telegram incompletas.")
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
@@ -154,39 +225,34 @@ def _send_telegram(message: str) -> bool:
         "disable_web_page_preview": True,
     }
     try:
-        resp = requests.post(url, json=payload, timeout=TELEGRAM_TIMEOUT)
-        if resp.status_code >= 400:
-            log.error(f"[TELEGRAM] HTTP {resp.status_code} :: {resp.text[:200]}")
-            return False
-        return True
+        resp = requests.post(TELEGRAM_API, json=payload, timeout=TELEGRAM_TIMEOUT)
+    except requests.exceptions.Timeout:
+        raise TelegramError(f"Timeout Telegram ({TELEGRAM_TIMEOUT}s).")
     except requests.exceptions.RequestException as e:
-        log.error(f"[TELEGRAM] Excepción de red :: {e}")
-        return False
+        raise TelegramError(f"Error de red Telegram: {e}")
 
-
-def _format_telegram_payload(ai_content: str) -> str:
-    """Envoltorio visual futurista de alto impacto."""
-    body = _sanitize_telegram(ai_content)
-    return (
-        "╔══════════════════════════════╗\n"
-        "║  *NEXUS-2070 // VIRAL FEED*  ║\n"
-        "╚══════════════════════════════╝\n\n"
-        f"🛰️ *Timestamp:* `{_utc_now()}`\n"
-        f"🧠 *Motor:* `{GROQ_MODEL}`\n"
-        f"⚡ *Modo:* PREDICTIVO-AUTÓNOMO\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{body}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔻 _Sistema NEXUS-2070 · Zero-Human-in-the-Loop_"
-    )
+    if resp.status_code >= 400:
+        # Fallback: reintenta sin Markdown si el parseo falla
+        log.warning(f"[TELEGRAM] HTTP {resp.status_code} :: reintento plain")
+        try:
+            resp2 = requests.post(
+                TELEGRAM_API,
+                json={**payload, "parse_mode": None, "text": message[: MAX_TELEGRAM_LEN - 1]},
+                timeout=TELEGRAM_TIMEOUT,
+            )
+            if resp2.status_code < 400:
+                log.info("[TELEGRAM] entregado en modo plain")
+                return
+        except requests.exceptions.RequestException:
+            pass
+        raise TelegramError(f"Telegram HTTP {resp.status_code}: {resp.text[:180]}")
 
 
 # -----------------------------------------------------------------------------
-# [4] ENDPOINTS
+# [7] ENDPOINTS
 # -----------------------------------------------------------------------------
-@app.get("/", tags=["core"])
+@app.get("/")
 async def root() -> JSONResponse:
-    """Estado operativo del núcleo con estética ciber-futurista."""
     online = all(ENV_STATUS.values())
     return JSONResponse(
         status_code=200,
@@ -194,79 +260,72 @@ async def root() -> JSONResponse:
             "system": "NEXUS-2070 // VIRAL CORE",
             "status": "OPERATIONAL" if online else "DEGRADED",
             "timestamp": _utc_now(),
-            "vector": "PRODUCTION",
             "modules": {
                 "groq_llm": "ONLINE" if ENV_STATUS["groq"] else "MISSING_KEY",
                 "telegram_token": "ONLINE" if ENV_STATUS["telegram_token"] else "MISSING",
                 "telegram_chat": "ONLINE" if ENV_STATUS["telegram_chat"] else "MISSING",
             },
             "model": GROQ_MODEL,
-            "uptime_signature": "🛰️ NEXUS_CORE::ALIVE",
         },
     )
 
 
-@app.post("/generar-tendencias", tags=["core"])
+@app.post("/generar-tendencias")
 async def generar_tendencias() -> JSONResponse:
     """
-    Orquestador autónomo:
-      1. Consulta predictiva a Groq (3 nichos virales del día).
-      2. Estructura guiones neuro-persuasivos para Shorts/Reels/TikTok.
-      3. Formatea payload futurista.
-      4. Despacha a Telegram.
-    Ante cualquier fallo: respuesta elegante (nunca silencio, nunca crash).
+    Orquestador:
+      1) Groq → 3 guiones virales estructurados.
+      2) Formatea para Telegram (Markdown).
+      3) Despacha al chat configurado.
+    Errores mapeados a códigos HTTP limpios (502/504/500).
     """
     try:
-        log.info("[FLOW] Iniciando generación de tendencias...")
-        ai_content = _call_groq()
-        log.info(f"[GROQ] OK :: {len(ai_content)} chars recibidos.")
-
-        telegram_msg = _format_telegram_payload(ai_content)
-        delivered = _send_telegram(telegram_msg)
+        log.info("[FLOW] iniciando generación...")
+        ai_text = _call_groq()
+        msg = _format_for_telegram(ai_text)
+        _send_telegram(msg)
 
         return JSONResponse(
             status_code=200,
             content={
-                "status": "SUCCESS" if delivered else "PARTIAL",
+                "status": "SUCCESS",
                 "timestamp": _utc_now(),
-                "telegram_delivered": delivered,
-                "content_preview": ai_content[:280] + ("..." if len(ai_content) > 280 else ""),
-                "vector": "NEURO-PERSUASION::ACTIVE",
+                "characters": len(ai_text),
+                "preview": ai_text[:240] + ("..." if len(ai_text) > 240 else ""),
             },
         )
 
-    except RuntimeError as e:
-        log.error(f"[FLOW] Error controlado :: {e}")
+    except GroqError as e:
+        log.error(f"[FLOW] GroqError :: {e}")
+        code = 504 if "Timeout" in str(e) else 502
+        return JSONResponse(
+            status_code=code,
+            content={"status": "AI_LAYER_ERROR", "detail": str(e), "timestamp": _utc_now()},
+        )
+
+    except TelegramError as e:
+        log.error(f"[FLOW] TelegramError :: {e}")
         return JSONResponse(
             status_code=502,
-            content={
-                "status": "AI_LAYER_ERROR",
-                "timestamp": _utc_now(),
-                "detail": str(e),
-                "hint": "Verifica GROQ_API_KEY y conectividad del proveedor.",
-            },
+            content={"status": "TELEGRAM_DELIVERY_ERROR", "detail": str(e), "timestamp": _utc_now()},
         )
+
     except Exception as e:
-        log.exception(f"[FLOW] Excepción inesperada :: {e}")
+        log.exception(f"[FLOW] inesperado :: {e}")
         return JSONResponse(
             status_code=500,
-            content={
-                "status": "INTERNAL_ERROR",
-                "timestamp": _utc_now(),
-                "detail": "Fallo capturado por el escudo NEXUS.",
-            },
+            content={"status": "INTERNAL_ERROR", "detail": "Escudo NEXUS activado.", "timestamp": _utc_now()},
         )
 
 
 # -----------------------------------------------------------------------------
-# [5] LIFECYCLE HOOKS (telemetría de arranque)
+# [8] STARTUP
 # -----------------------------------------------------------------------------
 @app.on_event("startup")
-async def _startup_event() -> None:
-    log.info("=" * 60)
-    log.info("NEXUS-2070 :: VIRAL CORE — ARRANQUE COMPLETO")
-    log.info(f"Modelo LLM     :: {GROQ_MODEL}")
-    log.info(f"Groq Key       :: {'SET' if ENV_STATUS['groq'] else 'MISSING'}")
-    log.info(f"Telegram Token :: {'SET' if ENV_STATUS['telegram_token'] else 'MISSING'}")
-    log.info(f"Telegram Chat  :: {'SET' if ENV_STATUS['telegram_chat'] else 'MISSING'}")
-    log.info("=" * 60)
+async def _startup() -> None:
+    log.info("=" * 58)
+    log.info("NEXUS-2070 :: STARTUP")
+    log.info(f"GROQ_KEY        :: {'SET' if ENV_STATUS['groq'] else 'MISSING'}")
+    log.info(f"TELEGRAM_TOKEN  :: {'SET' if ENV_STATUS['telegram_token'] else 'MISSING'}")
+    log.info(f"TELEGRAM_CHAT   :: {'SET' if ENV_STATUS['telegram_chat'] else 'MISSING'}")
+    log.info("=" * 58)
