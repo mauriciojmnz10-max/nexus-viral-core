@@ -36,7 +36,7 @@ GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
 TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-GROQ_ENDPOINT: str = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_ENDPOINT: str = "https://api.groq.com/v1/chat/completions"
 GROQ_MODEL: str = "llama-3.3-70b-versatile"
 TELEGRAM_TIMEOUT: int = 15
 GROQ_TIMEOUT: int = 45
