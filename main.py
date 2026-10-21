@@ -36,7 +36,13 @@ async def generar_tendencias():
             "model": GROQ_MODEL,
             "messages": [
                 {"role": "system", "content": "Eres un estratega de contenido viral. Responde en español directo."},
-                {"role": "user", "content": "Genera 3 guiones cortos y virales para TikTok/Reels. Sepáralos con la marca '@@@'. No uses asteriscos ni guiones bajos."}
+                {"role": "user", "content": "Genera 3 guiones hipersensacionalistas para TikTok/Reels. "
+    "Estructura estricta para cada uno:\n"
+    "1. GANCHO (Frase exacta para decir en los primeros 3 segundos, máxima curiosidad).\n"
+    "2. CUERPO (Máximo 5 líneas cortas, directas, para leer en pantalla o decir rápido).\n"
+    "3. CTA (Llamado a la acción magnético).\n"
+    "Separa cada guion con la marca '》》》》》'. No uses asteriscos ni guiones bajos."
+}
             ],
             "temperature": 0.8,
             "max_tokens": 1500
