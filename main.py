@@ -4,6 +4,7 @@ import logging
 import requests
 import subprocess
 import shutil
+import uuid
 from gtts import gTTS
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -24,8 +25,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V6.0 Engine // gTTS Sync")
+app = FastAPI(title="Nexus V7.0 Engine // Unique Workdir")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -67,7 +67,7 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (gTTS SÍNCRONO, SIN AWAIT)
+# 2. VOZ (gTTS SÍNCRONO)
 # =============================================================================
 def generar_audio_escena(texto: str, output_file: str) -> bool:
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
@@ -131,6 +131,10 @@ def descargar_clip_vertical(query: str, output_file: str):
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
+        # Forzamos la eliminación del archivo de salida si existe
+        if os.path.exists(output):
+            os.remove(output)
+            
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", video,
@@ -146,9 +150,9 @@ def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
         log.error(f"[FFMPEG] Error escena: {e.stderr.decode()[:300]}")
         return False
 
-def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str):
+def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str, work_dir: str):
     try:
-        srt_file = os.path.join(WORK_DIR, "subs.srt")
+        srt_file = os.path.join(work_dir, "subs.srt")
         current_time = 0.0
         with open(srt_file, "w", encoding="utf-8") as f:
             for i, escena in enumerate(escenas):
@@ -163,10 +167,13 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
                 f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
                 current_time = end
 
-        concat_file = os.path.join(WORK_DIR, "concat.txt")
+        concat_file = os.path.join(work_dir, "concat.txt")
         with open(concat_file, "w") as f:
             for vid in lista_videos:
                 f.write(f"file '{vid}'\n")
+
+        if os.path.exists(output_final):
+            os.remove(output_final)
 
         cmd = [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file,
@@ -181,9 +188,14 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. LÓGICA DE FONDO (SÍNCRONA)
+# 5. LÓGICA DE FONDO (CON DIRECTORIO ÚNICO)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str):
+    # Creamos un directorio único para esta ejecución
+    work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
+    os.makedirs(work_dir, exist_ok=True)
+    log.info(f"[BG] Directorio de trabajo: {work_dir}")
+
     try:
         escenas = generar_guion_estructurado(tema)
         if not escenas:
@@ -194,9 +206,9 @@ def procesar_video_en_segundo_plano(tema: str):
         for i, escena in enumerate(escenas):
             log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
             
-            audio_path = os.path.join(WORK_DIR, f"audio_{i}.mp3")
-            video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
-            scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
+            audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
+            video_bg = os.path.join(work_dir, f"bg_{i}.mp4")
+            scene_out = os.path.join(work_dir, f"scene_{i}.mp4")
 
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
@@ -216,8 +228,8 @@ def procesar_video_en_segundo_plano(tema: str):
             return
 
         log.info("[BG] Concatenando...")
-        video_final = os.path.join(WORK_DIR, "final.mp4")
-        if not concatenar_y_subtitular(videos_procesados, escenas, video_final):
+        video_final = os.path.join(work_dir, "final.mp4")
+        if not concatenar_y_subtitular(videos_procesados, escenas, video_final, work_dir):
             log.error("[BG] Fallo concatenación final.")
             return
 
@@ -225,7 +237,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V6.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V7.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -234,21 +246,19 @@ def procesar_video_en_segundo_plano(tema: str):
     except Exception as e:
         log.error(f"[BG] ERROR: {e}")
     finally:
-        if os.path.exists(WORK_DIR): shutil.rmtree(WORK_DIR)
+        # Limpiamos el directorio único
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 # =============================================================================
 # 6. ENDPOINT PRINCIPAL
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V6.0"}
+    return {"status": "ONLINE", "engine": "Nexus V7.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
-    if os.path.exists(WORK_DIR):
-        shutil.rmtree(WORK_DIR)
-    os.makedirs(WORK_DIR, exist_ok=True)
-    
     tema = "Secretos del universo"
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
