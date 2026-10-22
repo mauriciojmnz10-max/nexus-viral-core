@@ -26,7 +26,7 @@ CF_GATEWAY_ID = "i-a"
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V3.5 Engine // Audio Validator")
+app = FastAPI(title="Nexus V3.6 Engine // Syntax Fixed")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -71,7 +71,6 @@ def generar_guion_estructurado(tema: str) -> list:
 # 2. VOZ, VALIDACIÓN Y CONVERSIÓN
 # =============================================================================
 def es_audio_valido(filepath: str) -> bool:
-    """Usa ffprobe para verificar que el archivo de audio es legible y tiene duración."""
     if not os.path.exists(filepath) or os.path.getsize(filepath) < 100:
         return False
     try:
@@ -86,8 +85,8 @@ def es_audio_valido(filepath: str) -> bool:
 
 async def generar_audio_escena(texto: str, output_file: str):
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
-    
     temp_mp3 = output_file.replace(".wav", "_temp.mp3")
+    
     try:
         communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural")
         await communicate.save(temp_mp3)
@@ -95,21 +94,18 @@ async def generar_audio_escena(texto: str, output_file: str):
         log.error(f"[TTS] Edge-TTS falló directamente: {e}")
         temp_mp3 = None
 
-    # Validar el MP3 generado por edge-tts
+    # Validar y convertir
     if temp_mp3 and es_audio_valido(temp_mp3):
         try:
-            # Convertir a WAV para limpiar el archivo
             cmd = ["ffmpeg", "-y", "-i", temp_mp3, "-ar", "44100", "-ac", "2", output_file]
             subprocess.run(cmd, check=True, capture_output=True, timeout=15)
             log.info(f"[TTS] Audio convertido a WAV correctamente.")
-            
-            # Limpiamos el MP3 temporal
             if os.path.exists(temp_mp3): os.remove(temp_mp3)
             return True
         except Exception as e:
             log.error(f"[TTS] Fallo al convertir MP3 a WAV: {e}")
 
-    # Si falló, generar silencio de respaldo
+    # Respaldo: Silencio
     log.warning("[TTS] El audio original no es válido. Generando silencio de respaldo.")
     if temp_mp3 and os.path.exists(temp_mp3):
         try: os.remove(temp_mp3)
@@ -217,7 +213,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. LÓGICA DE FONDO
+# 5. LÓGICA DE FONDO (AQUÍ ESTABA EL ERROR DE SINTAXIS)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str):
     try:
@@ -234,7 +230,9 @@ def procesar_video_en_segundo_plano(tema: str):
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            await asyncio.to_thread(asyncio.run, generar_audio_escena(escena["texto"], audio_path))
+            # CORRECCIÓN: Usamos asyncio.run() de forma limpia, sin await aquí.
+            asyncio.run(generar_audio_escena(escena["texto"], audio_path))
+            
             duracion = obtener_duracion_audio(audio_path)
             
             if not descargar_clip_vertical(escena["visual"], video_bg):
@@ -261,7 +259,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.5* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.6* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -277,7 +275,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V3.5"}
+    return {"status": "ONLINE", "engine": "Nexus V3.6"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
@@ -287,6 +285,7 @@ async def generar_video_completo(background_tasks: BackgroundTasks):
     
     tema = "Secretos del universo"
     
+    # Enviamos el trabajo a segundo plano (FastAPI se encarga de la gestión de hilos)
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
