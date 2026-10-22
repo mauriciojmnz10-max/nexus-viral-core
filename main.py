@@ -26,7 +26,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V9.0 // pydub Engine")
+app = FastAPI(title="Nexus V10.0 // Stable Stock")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -75,26 +75,20 @@ def generar_audio_escena(texto: str, output_wav: str) -> bool:
     temp_mp3 = output_wav.replace(".wav", "_temp.mp3")
     
     try:
-        # 1. Generar MP3 con gTTS
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(temp_mp3)
         
-        # 2. Usar pydub para leer el MP3 y exportarlo como WAV limpio
         audio = AudioSegment.from_file(temp_mp3, format="mp3")
         audio.export(output_wav, format="wav")
         
         log.info(f"[TTS] Audio limpiado con pydub y exportado a WAV.")
-        
-        # Limpiar MP3 temporal
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
         return True
-        
     except Exception as e:
         log.error(f"[TTS] Fallo con pydub: {e}. Usando silencio.")
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
-        # Respaldo: Generar silencio
         try:
-            silence = AudioSegment.silent(duration=3000) # 3 segundos
+            silence = AudioSegment.silent(duration=3000)
             silence.export(output_wav, format="wav")
             return True
         except Exception as fallback_error:
@@ -110,25 +104,22 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS
+# 3. DESCARGA DE CLIPS (SOLO MIXKIT, CON VALIDACIÓN)
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str):
+    # Usamos siempre Mixkit para evitar problemas de Coverr
+    fallback_url = "https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4"
     try:
-        url = f"https://api.coverr.co/videos?query={query}&per_page=1&orientation=portrait"
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            hits = r.json().get("hits", [])
-            if hits:
-                video_url = hits[0].get("urls", {}).get("mp4_download") or hits[0].get("urls", {}).get("mp4")
-                if video_url:
-                    with open(output_file, "wb") as f:
-                        f.write(requests.get(video_url, timeout=20).content)
-                    return True
-    except Exception:
-        pass
-    try:
+        log.info(f"[STOCK] Descargando video de respaldo...")
         with open(output_file, "wb") as f:
-            f.write(requests.get("https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4", timeout=20).content)
+            f.write(requests.get(fallback_url, timeout=30).content)
+        
+        # Validar que el archivo descargado es un video válido
+        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            log.error(f"[STOCK] Video de respaldo inválido.")
+            return False
         return True
     except Exception as e:
         log.error(f"[STOCK] Fallo total: {e}")
@@ -239,7 +230,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V9.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V10.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -256,7 +247,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V9.0"}
+    return {"status": "ONLINE", "engine": "Nexus V10.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
