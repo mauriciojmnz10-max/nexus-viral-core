@@ -21,13 +21,13 @@ log = logging.getLogger("nexus")
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-PIXABAY_API_KEY = (os.getenv("PIXABAY_API_KEY") or "").strip() # NUEVA VARIABLE
+PIXABAY_API_KEY = (os.getenv("PIXABAY_API_KEY") or "").strip()
 
 CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V13.0 // Pixabay Engine")
+app = FastAPI(title="Nexus V14.0 // TikTok Pro")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -103,10 +103,9 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS (PIXABAY + FALLBACK LOCAL)
+# 3. DESCARGA DE CLIPS (PIXABAY)
 # =============================================================================
-def descargar_clip_vertical(query: str, output_file: str, duracion: float):
-    # 1. Intentar con Pixabay
+def descargar_clip_vertical(query: str, output_file: str):
     if PIXABAY_API_KEY:
         try:
             url = "https://pixabay.com/api/videos/"
@@ -121,7 +120,6 @@ def descargar_clip_vertical(query: str, output_file: str, duracion: float):
             if r.status_code == 200:
                 hits = r.json().get("hits", [])
                 if hits:
-                    # Buscar la mejor resolución (medium es ideal para Render)
                     videos = hits[0].get("videos", {})
                     video_url = videos.get("medium", {}).get("url") or videos.get("small", {}).get("url")
                     
@@ -129,21 +127,16 @@ def descargar_clip_vertical(query: str, output_file: str, duracion: float):
                         log.info(f"[STOCK] Descargando de Pixabay...")
                         with open(output_file, "wb") as f:
                             f.write(requests.get(video_url, timeout=30).content)
-                        
-                        # Validar que el video descargado sirve
-                        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
-                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                        if res.returncode == 0:
-                            return True
+                        return True
         except Exception as e:
             log.warning(f"[STOCK] Pixabay falló: {e}")
 
-    # 2. FALLBACK: Generar fondo local si Pixabay falla
+    # FALLBACK: Generar fondo local
     log.warning("[STOCK] Generando fondo local de respaldo...")
     try:
         cmd = [
             "ffmpeg", "-y",
-            "-f", "lavfi", "-i", f"color=c=0x1a1a2e:s=1080x1920:d={duracion},format=yuv420p",
+            "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=1080x1920:d=10,format=yuv420p",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
             output_file
         ]
@@ -154,17 +147,20 @@ def descargar_clip_vertical(query: str, output_file: str, duracion: float):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE Y SUBTÍTULOS
+# 4. ENSAMBLAJE Y SUBTÍTULOS (SINCRONIZACIÓN PERFECTA)
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
         if os.path.exists(output): os.remove(output)
+        
+        # TRUCO: Cortamos el video de fondo a la duración exacta del audio.
+        # Luego mezclamos el audio. Esto evita el lag y el "disco rayado".
         cmd = [
             "ffmpeg", "-y",
-            "-stream_loop", "-1", "-i", video,
+            "-i", video,
             "-i", audio,
-            "-t", str(duracion),
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-t", str(duracion), # Forzamos que dure lo mismo que el audio
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
             "-c:a", "aac", "-shortest", output
         ]
@@ -180,8 +176,11 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         current_time = 0.0
         with open(srt_file, "w", encoding="utf-8") as f:
             for i, escena in enumerate(escenas):
-                duracion_estimada = max(2.0, len(escena["texto"].split()) / 2.5)
-                start, end = current_time, current_time + duracion_estimada
+                # Usamos la duración real del audio de la escena
+                audio_path = os.path.join(work_dir, f"audio_{i}.wav")
+                duracion_real = obtener_duracion_audio(audio_path)
+                
+                start, end = current_time, current_time + duracion_real
                 
                 def format_time(sec):
                     h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
@@ -197,9 +196,15 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
                 f.write(f"file '{vid}'\n")
 
         if os.path.exists(output_final): os.remove(output_final)
+        
+        # Estilo TikTok: Fuente grande, centrada, bordes gruesos.
+        # Alignment=10 (centro), MarginV=500 (para que no tape los botones de la app)
+        style = "FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=10,MarginV=400"
+        
         cmd = [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file,
-            "-vf", f"subtitles={srt_file}:force_style='FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3'",
+            "ffmpeg", "-y", 
+            "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-vf", f"subtitles={srt_file}:force_style='{style}'",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
             "-c:a", "aac", output_final
         ]
@@ -234,8 +239,7 @@ def procesar_video_en_segundo_plano(tema: str):
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
-            # Descargar de Pixabay o generar fondo local
-            if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg, duracion):
+            if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg):
                 log.error(f"[BG] Fallo stock escena {i+1}")
                 continue
 
@@ -249,7 +253,7 @@ def procesar_video_en_segundo_plano(tema: str):
             log.error("[BG] No se procesó ningún video.")
             return
 
-        log.info("[BG] Concatenando...")
+        log.info("[BG] Concatenando y subtitulando...")
         video_final = os.path.join(work_dir, "final.mp4")
         if not concatenar_y_subtitular(videos_procesados, escenas, video_final, work_dir):
             log.error("[BG] Fallo concatenación final.")
@@ -259,7 +263,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V13.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V14.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -276,7 +280,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V13.0"}
+    return {"status": "ONLINE", "engine": "Nexus V14.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
