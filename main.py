@@ -30,17 +30,17 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V20.0 // Pro Studio")
+app = FastAPI(title="Nexus V21.0 // Low Memory")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (7 ESCENAS)
+# 1. GENERACIÓN DE GUION (5 ESCENAS)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
-    log.info(f"[GROQ] Generando guion de 7 escenas para: {tema}")
+    log.info(f"[GROQ] Generando guion de 5 escenas para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -51,24 +51,22 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
     
     prompt = f"""
     Actúa como un guionista experto en videos virales de TikTok.
-    Genera un guion de 7 escenas sobre: '{tema}', con un tono de {nicho}.
+    Genera un guion de 5 escenas sobre: '{tema}', con un tono de {nicho}.
     
     REGLAS:
     1. GANCHO: La primera frase debe enganchar en 3 segundos.
-    2. DESARROLLO: 5 frases que cuenten una historia o datos curiosos.
+    2. DESARROLLO: 3 frases que cuenten una historia o datos curiosos.
     3. CIERRE: Una frase final con llamado a la acción (CTA).
-    4. Cada escena debe tener entre 10 y 15 palabras para que duren más.
+    4. Cada escena debe tener entre 12 y 18 palabras para que duren más.
     
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
-        {{"texto": "Gancho (máx 12 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Desarrollo 1 (máx 15 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Desarrollo 2 (máx 15 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Desarrollo 3 (máx 15 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Desarrollo 4 (máx 15 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Desarrollo 5 (máx 15 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "CTA (máx 12 palabras)", "visual": "english prompt for stock video"}}
+        {{"texto": "Gancho (máx 15 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 1 (máx 18 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 2 (máx 18 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 3 (máx 18 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "CTA (máx 15 palabras)", "visual": "english prompt for stock video"}}
       ]
     }}
     """
@@ -145,7 +143,7 @@ def descargar_clip_vertical(query: str, output_file: str):
                 hits = r.json().get("hits", [])
                 if hits:
                     videos = hits[0].get("videos", {})
-                    video_url = videos.get("medium", {}).get("url") or videos.get("small", {}).get("url")
+                    video_url = videos.get("small", {}).get("url") or videos.get("medium", {}).get("url")
                     if video_url:
                         with open(output_file, "wb") as f:
                             f.write(requests.get(video_url, timeout=30).content)
@@ -154,21 +152,22 @@ def descargar_clip_vertical(query: str, output_file: str):
             pass
     # Fallback
     try:
-        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=1080x1920:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
+        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=720x1280:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except Exception:
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE DE VIDEO MUDO Y AUDIO MAESTRO
+# 4. ENSAMBLAJE DE VIDEO MUDO Y AUDIO MAESTRO (720p)
 # =============================================================================
 def procesar_escena_video_mudo(video: str, output: str, duracion: float):
     try:
         if os.path.exists(output): os.remove(output)
+        # Usamos 720x1280 en lugar de 1080x1920 para ahorrar RAM
         cmd = [
             "ffmpeg", "-y", "-i", video, "-t", str(duracion),
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
+            "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=30,setsar=1",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", "-an", output
         ]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -222,7 +221,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
 
         if os.path.exists(output_final): os.remove(output_final)
         
-        style = "FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=300"
+        style = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200"
         
         video_mudo_temp = os.path.join(work_dir, "video_mudo.mp4")
         cmd_concat = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file, "-c", "copy", video_mudo_temp]
@@ -301,7 +300,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V20.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V21.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -317,7 +316,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V20.0"}
+    return {"status": "ONLINE", "engine": "Nexus V21.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
