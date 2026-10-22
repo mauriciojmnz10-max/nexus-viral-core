@@ -32,14 +32,14 @@ CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 MUSIC_URL = "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3?filename=ambient-piano-amp-strings-10711.mp3"
 
-app = FastAPI(title="Nexus V27.0 // Viral Retention")
+app = FastAPI(title="Nexus V28.0 // Pro Edition")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (ESTRUCTURA VIRAL DE 12 ESCENAS)
+# 1. GENERACIÓN DE GUION (12 ESCENAS - PROMPTS CORTOS)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
     log.info(f"[GROQ] Generando guion viral de 12 escenas para: {tema}")
@@ -55,38 +55,38 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
     Actúa como un Copywriter Senior experto en videos virales de TikTok.
     Genera un guion de 12 escenas sobre: '{tema}', con un tono de {nicho}.
     
-    REGLAS DE ORO:
+    REGLAS DE ORO DEL TEXTO:
     1. GANCHO (Escena 1): Pregunta impactante o dato que rompa el cerebro. Debe enganchar en 3 segundos.
-    2. DESARROLLO (Escenas 2-11): Usa el "bucle de curiosidad". Cuenta la historia con datos sorprendentes, secretos o morbo. Haz que el espectador necesite saber el final.
-    3. CTA (Escena 12): Un llamado a la acción magnético. Pide explícitamente que den LIKE, COMENTEN con una palabra y COMPARTAN con un amigo.
-    4. LONGITUD: Exactamente 10 a 14 palabras por escena (para que cada una dure ~4 segundos).
+    2. DESARROLLO (Escenas 2-11): Usa el "bucle de curiosidad". Cuenta la historia con datos sorprendentes. No uses puntos y seguido, usa comas para que la voz fluya.
+    3. CTA (Escena 12): Pide LIKE, COMENTAR y COMPARTIR.
+    4. LONGITUD ESTRICTA: Exactamente entre 8 y 10 palabras por escena.
 
-    REGLAS VISUALES:
-    Para el campo "visual", escribe el prompt en INGLÉS para buscar el video en Pixabay. 
-    Usa términos cinematográficos: "cinematic, 4k, dramatic lighting, slow motion, photorealistic".
+    REGLAS VISUALES (MUY IMPORTANTE):
+    Para el campo "visual", escribe 1 o 2 palabras clave en INGLÉS. NO uses frases largas.
+    Ejemplo: Si hablas de agujeros negros, escribe "black hole" o "galaxy". No escribas "cinematic 4k shot of a black hole".
     
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown:
     {{
       "escenas": [
-        {{"texto": "Gancho neuro-persuasivo (máx 12 palabras)", "visual": "cinematic 4k shot of..."}},
-        {{"texto": "Contexto 1", "visual": "dramatic lighting, slow motion of..."}},
-        {{"texto": "Contexto 2", "visual": "photorealistic detail of..."}},
-        {{"texto": "Dato curioso 1", "visual": "epic cinematic background of..."}},
-        {{"texto": "Dato curioso 2", "visual": "high quality 4k shot of..."}},
-        {{"texto": "Giro de la historia", "visual": "cinematic close up of..."}},
-        {{"texto": "Desarrollo profundo 1", "visual": "dramatic slow motion of..."}},
-        {{"texto": "Desarrollo profundo 2", "visual": "atmospheric 4k shot of..."}},
-        {{"texto": "Secreto revelado", "visual": "photorealistic background of..."}},
-        {{"texto": "Clímax", "visual": "cinematic shot of..."}},
-        {{"texto": "Conclusión", "visual": "dramatic lighting of..."}},
-        {{"texto": "CTA: Pide like, comentario y compartir", "visual": "epic final shot of..."}}
+        {{"texto": "Gancho neuro-persuasivo (8-10 palabras)", "visual": "space"}},
+        {{"texto": "Contexto 1", "visual": "stars"}},
+        {{"texto": "Contexto 2", "visual": "nebula"}},
+        {{"texto": "Dato curioso 1", "visual": "planet"}},
+        {{"texto": "Dato curioso 2", "visual": "galaxy"}},
+        {{"texto": "Giro de la historia", "visual": "cosmos"}},
+        {{"texto": "Desarrollo profundo 1", "visual": "universe"}},
+        {{"texto": "Desarrollo profundo 2", "visual": "astronomy"}},
+        {{"texto": "Secreto revelado", "visual": "telescope"}},
+        {{"texto": "Clímax", "visual": "supernova"}},
+        {{"texto": "Conclusión", "visual": "dark matter"}},
+        {{"texto": "CTA: Pide like, comentario y compartir", "visual": "milky way"}}
       ]
     }}
     """
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8, # Un poco más de creatividad para el morbo
+        "temperature": 0.8,
         "response_format": {"type": "json_object"}
     }
     try:
@@ -98,10 +98,11 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (EDGE-TTS)
+# 2. VOZ (EDGE-TTS LATINO)
 # =============================================================================
 async def generar_audio_edge(texto: str, output_mp3: str):
-    voice = "es-ES-AlvaroNeural" 
+    # Cambiamos a voz latina para que suene más natural
+    voice = "es-MX-JorgeNeural" 
     communicate = edge_tts.Communicate(texto, voice)
     await communicate.save(output_mp3)
 
@@ -127,13 +128,14 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS Y MÚSICA
+# 3. DESCARGA DE CLIPS (BÚSQUEDA DIRECTA)
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str):
     if PIXABAY_API_KEY:
         try:
             url = "https://pixabay.com/api/videos/"
-            params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
+            # Buscamos por la palabra clave corta (ej. "space")
+            params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 5, "orientation": "vertical", "video_type": "film"}
             r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
                 hits = r.json().get("hits", [])
@@ -146,6 +148,7 @@ def descargar_clip_vertical(query: str, output_file: str):
                         return True
         except Exception:
             pass
+    # Fallback si Pixabay falla
     try:
         cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=480x854:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -188,23 +191,41 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
         descargar_clip_vertical(escena["visual"], v_path)
         videos_paths.append(v_path)
 
+    # GENERACIÓN DE SUBTÍTULOS DINÁMICOS
     srt_file = os.path.join(work_dir, f"b{num_bloque}_subs.srt")
     current_time = 0.0
     with open(srt_file, "w", encoding="utf-8") as f:
+        contador = 1
         for i, escena in enumerate(escenas_bloque):
             duracion = obtener_duracion_audio(audios_paths[i])
             start, end = current_time, current_time + duracion
-            def format_time(sec):
-                h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
-                ms = int((sec - int(sec)) * 1000)
-                return f"{h:02}:{m:02}:{s:02},{ms:03}"
             
-            texto = escena['texto']
-            if len(texto) > 18:
-                mid = len(texto) // 2
-                texto = texto[:mid] + "\n" + texto[mid:]
+            # Partir el texto en 2 o 3 trozos pequeños para que no sea un párrafo
+            palabras = escena['texto'].split()
+            if len(palabras) > 5:
+                mid = len(palabras) // 2
+                parte1 = " ".join(palabras[:mid])
+                parte2 = " ".join(palabras[mid:])
+                
+                # Tiempo para la primera mitad
+                mid_time = start + (duracion / 2)
+                
+                def format_time(sec):
+                    h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
+                    ms = int((sec - int(sec)) * 1000)
+                    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+                
+                f.write(f"{contador}\n{format_time(start)} --> {format_time(mid_time)}\n{parte1}\n\n")
+                f.write(f"{contador+1}\n{format_time(mid_time)} --> {format_time(end)}\n{parte2}\n\n")
+                contador += 2
+            else:
+                def format_time(sec):
+                    h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
+                    ms = int((sec - int(sec)) * 1000)
+                    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+                f.write(f"{contador}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
+                contador += 1
             
-            f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{texto}\n\n")
             current_time = end
 
     inputs = []
@@ -218,7 +239,7 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
     filter_complex += f"{concat_inputs}concat=n={len(escenas_bloque)}:v=1:a=0[v];"
     
     # Estilo de letra pro
-    style = "FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=150"
+    style = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=150"
     filter_complex += f"[v]subtitles={srt_file}:force_style='{style}'[vout]"
 
     bloque_out = os.path.join(work_dir, f"parte_{num_bloque}.mp4")
@@ -238,11 +259,10 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
         if os.path.exists(path): os.remove(path)
     if os.path.exists(audio_bloque): os.remove(audio_bloque)
 
-    log.info(f"[BLOQUE {num_bloque}] Completado.")
     return bloque_out
 
 # =============================================================================
-# 5. ORQUESTADOR PRINCIPAL (4 BLOQUES)
+# 5. ORQUESTADOR PRINCIPAL
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
@@ -289,7 +309,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V27.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n⏱️ Duración: ~64s\n🚀 Optimizado para Retención y Monetización"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V28.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n⏱️ Duración: ~64s\n🚀 Subtítulos Pro + Voz Latina"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -305,7 +325,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V27.0"}
+    return {"status": "ONLINE", "engine": "Nexus V28.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
