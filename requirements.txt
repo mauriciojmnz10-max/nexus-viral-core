@@ -3,4 +3,4 @@ uvicorn
 gunicorn
 requests
 python-dotenv
-edge-tts
+gTTS
