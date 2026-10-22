@@ -21,12 +21,13 @@ log = logging.getLogger("nexus")
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+PEXELS_API_KEY = (os.getenv("PEXELS_API_KEY") or "").strip() # NUEVA VARIABLE
 
 CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V11.0 // Local Video Generator")
+app = FastAPI(title="Nexus V12.0 // Real Stock Video")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -46,10 +47,10 @@ def generar_guion_estructurado(tema: str) -> list:
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
-        {{"texto": "Frase del gancho (máx 10 palabras)"}},
-        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)"}},
-        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)"}},
-        {{"texto": "Frase del CTA (máx 10 palabras)"}}
+        {{"texto": "Frase del gancho (máx 10 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Frase del CTA (máx 10 palabras)", "visual": "english prompt for stock video"}}
       ]
     }}
     """
@@ -81,18 +82,16 @@ def generar_audio_escena(texto: str, output_wav: str) -> bool:
         audio = AudioSegment.from_file(temp_mp3, format="mp3")
         audio.export(output_wav, format="wav")
         
-        log.info(f"[TTS] Audio limpiado con pydub y exportado a WAV.")
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
         return True
     except Exception as e:
-        log.error(f"[TTS] Fallo con pydub: {e}. Usando silencio.")
+        log.error(f"[TTS] Fallo: {e}. Usando silencio.")
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
         try:
             silence = AudioSegment.silent(duration=3000)
             silence.export(output_wav, format="wav")
             return True
-        except Exception as fallback_error:
-            log.error(f"[TTS] Respaldo falló: {fallback_error}")
+        except Exception:
             return False
 
 def obtener_duracion_audio(filepath: str) -> float:
@@ -104,22 +103,49 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. GENERACIÓN DE VIDEO DE FONDO LOCAL (SIN INTERNET)
+# 3. DESCARGA DE CLIPS (PEXELS + FALLBACK LOCAL)
 # =============================================================================
-def generar_video_fondo_local(output_file: str, duracion: float, color_hex: str = "0x1a1a2e"):
-    """Genera un video de fondo sólido usando FFmpeg, sin descargar nada."""
+def descargar_clip_vertical(query: str, output_file: str, duracion: float):
+    # Intentar con Pexels
+    if PEXELS_API_KEY:
+        try:
+            url = f"https://api.pexels.com/videos/search?query={query}&per_page=1&orientation=portrait&size=medium"
+            headers = {"Authorization": PEXELS_API_KEY}
+            r = requests.get(url, headers=headers, timeout=15)
+            if r.status_code == 200:
+                videos = r.json().get("videos", [])
+                if videos:
+                    # Buscar el archivo de video más pequeño que cubra el tiempo
+                    video_files = videos[0].get("video_files", [])
+                    # Ordenar por calidad (preferimos HD 720p)
+                    video_files.sort(key=lambda x: x.get("width", 9999))
+                    for vf in video_files:
+                        if vf.get("link"):
+                            log.info(f"[STOCK] Descargando de Pexels: {vf.get('width')}x{vf.get('height')}")
+                            with open(output_file, "wb") as f:
+                                f.write(requests.get(vf["link"], timeout=30).content)
+                            
+                            # Validar que el video descargado sirve
+                            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                            if res.returncode == 0:
+                                return True
+        except Exception as e:
+            log.warning(f"[STOCK] Pexels falló: {e}")
+
+    # FALLBACK: Generar fondo local si Pexels falla
+    log.warning("[STOCK] Generando fondo local de respaldo...")
     try:
-        log.info(f"[STOCK] Generando video de fondo local (color {color_hex})...")
         cmd = [
             "ffmpeg", "-y",
-            "-f", "lavfi", "-i", f"color=c={color_hex}:s=1080x1920:d={duracion},format=yuv420p",
+            "-f", "lavfi", "-i", f"color=c=0x1a1a2e:s=1080x1920:d={duracion},format=yuv420p",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
             output_file
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except Exception as e:
-        log.error(f"[STOCK] Error generando fondo local: {e}")
+        log.error(f"[STOCK] Fallback falló: {e}")
         return False
 
 # =============================================================================
@@ -203,9 +229,9 @@ def procesar_video_en_segundo_plano(tema: str):
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
-            # Generar el video de fondo localmente
-            if not generar_video_fondo_local(video_bg, duracion):
-                log.error(f"[BG] Fallo al generar fondo escena {i+1}")
+            # Descargar de Pexels o generar fondo local
+            if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg, duracion):
+                log.error(f"[BG] Fallo stock escena {i+1}")
                 continue
 
             if not procesar_escena_video(audio_path, video_bg, scene_out, duracion):
@@ -228,7 +254,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V11.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V12.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -245,7 +271,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V11.0"}
+    return {"status": "ONLINE", "engine": "Nexus V12.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
