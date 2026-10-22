@@ -5,7 +5,7 @@ import edge_tts
 import requests
 import subprocess
 import shutil
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
@@ -20,13 +20,12 @@ GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 
-# Cloudflare Gateway
 CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V3.1 Engine")
+app = FastAPI(title="Nexus V3.2 Engine // Fire & Forget")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -166,61 +165,78 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. ENDPOINT
+# 5. LÓGICA DE FONDO (Se ejecuta después de responder a Cron-job)
 # =============================================================================
-@app.get("/")
-async def root():
-    return {"status": "ONLINE", "engine": "Nexus V3.1"}
-
-@app.post("/generar-tendencias")
-async def generar_video_completo():
-    if os.path.exists(WORK_DIR):
-        shutil.rmtree(WORK_DIR)
-    os.makedirs(WORK_DIR, exist_ok=True)
-    
+def procesar_video_en_segundo_plano(tema: str):
     try:
-        tema = "Secretos del universo"
-        
         escenas = generar_guion_estructurado(tema)
         if not escenas:
-            raise Exception("Guion vacío.")
+            log.error("[BG] Guion vacío.")
+            return
 
         videos_procesados = []
         for i, escena in enumerate(escenas):
-            log.info(f"[FLOW] Escena {i+1}/{len(escenas)}...")
+            log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
             audio_path = os.path.join(WORK_DIR, f"audio_{i}.mp3")
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            await generar_audio_escena(escena["texto"], audio_path)
+            import asyncio
+            asyncio.run(generar_audio_escena(escena["texto"], audio_path))
             duracion = obtener_duracion_audio(audio_path)
             
             if not descargar_clip_vertical(escena["visual"], video_bg):
-                raise Exception(f"Fallo stock escena {i+1}")
+                log.error(f"[BG] Fallo stock escena {i+1}")
+                continue
 
             if not procesar_escena_video(audio_path, video_bg, scene_out, duracion):
-                raise Exception(f"Fallo FFmpeg escena {i+1}")
+                log.error(f"[BG] Fallo FFmpeg escena {i+1}")
+                continue
             
             videos_procesados.append(scene_out)
 
-        log.info("[FLOW] Concatenando...")
+        if not videos_procesados:
+            log.error("[BG] No se procesó ningún video.")
+            return
+
+        log.info("[BG] Concatenando...")
         video_final = os.path.join(WORK_DIR, "final.mp4")
         if not concatenar_y_subtitular(videos_procesados, escenas, video_final):
-            raise Exception("Fallo concatenación final.")
+            log.error("[BG] Fallo concatenación final.")
+            return
 
-        log.info("[FLOW] Enviando a Telegram...")
+        log.info("[BG] Enviando a Telegram...")
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.1* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.2* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
-
-        shutil.rmtree(WORK_DIR)
-        return {"status": "SUCCESS", "message": "Video enviado."}
+        log.info("[BG] ¡Video enviado!")
 
     except Exception as e:
-        log.error(f"[FLOW] ERROR CRÍTICO: {e}")
+        log.error(f"[BG] ERROR: {e}")
+    finally:
         if os.path.exists(WORK_DIR): shutil.rmtree(WORK_DIR)
-        return JSONResponse(status_code=500, content={"status": "ERROR", "detail": str(e)})
+
+# =============================================================================
+# 6. ENDPOINT PRINCIPAL
+# =============================================================================
+@app.get("/")
+async def root():
+    return {"status": "ONLINE", "engine": "Nexus V3.2"}
+
+@app.post("/generar-tendencias")
+async def generar_video_completo(background_tasks: BackgroundTasks):
+    if os.path.exists(WORK_DIR):
+        shutil.rmtree(WORK_DIR)
+    os.makedirs(WORK_DIR, exist_ok=True)
+    
+    tema = "Secretos del universo"
+    
+    # Magia: Le decimos a FastAPI que haga el trabajo PESADO en segundo plano
+    background_tasks.add_task(procesar_video_en_segundo_plano, tema)
+    
+    # Respondemos a Cron-job.org INMEDIATAMENTE
+    return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
