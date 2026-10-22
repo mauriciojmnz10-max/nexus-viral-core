@@ -26,7 +26,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V10.0 // Stable Stock")
+app = FastAPI(title="Nexus V11.0 // Local Video Generator")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -46,10 +46,10 @@ def generar_guion_estructurado(tema: str) -> list:
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
-        {{"texto": "Frase del gancho (máx 10 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Frase del CTA (máx 10 palabras)", "visual": "english prompt for stock video"}}
+        {{"texto": "Frase del gancho (máx 10 palabras)"}},
+        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)"}},
+        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)"}},
+        {{"texto": "Frase del CTA (máx 10 palabras)"}}
       ]
     }}
     """
@@ -104,25 +104,22 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS (SOLO MIXKIT, CON VALIDACIÓN)
+# 3. GENERACIÓN DE VIDEO DE FONDO LOCAL (SIN INTERNET)
 # =============================================================================
-def descargar_clip_vertical(query: str, output_file: str):
-    # Usamos siempre Mixkit para evitar problemas de Coverr
-    fallback_url = "https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4"
+def generar_video_fondo_local(output_file: str, duracion: float, color_hex: str = "0x1a1a2e"):
+    """Genera un video de fondo sólido usando FFmpeg, sin descargar nada."""
     try:
-        log.info(f"[STOCK] Descargando video de respaldo...")
-        with open(output_file, "wb") as f:
-            f.write(requests.get(fallback_url, timeout=30).content)
-        
-        # Validar que el archivo descargado es un video válido
-        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode != 0:
-            log.error(f"[STOCK] Video de respaldo inválido.")
-            return False
+        log.info(f"[STOCK] Generando video de fondo local (color {color_hex})...")
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c={color_hex}:s=1080x1920:d={duracion},format=yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+            output_file
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
         return True
     except Exception as e:
-        log.error(f"[STOCK] Fallo total: {e}")
+        log.error(f"[STOCK] Error generando fondo local: {e}")
         return False
 
 # =============================================================================
@@ -206,8 +203,9 @@ def procesar_video_en_segundo_plano(tema: str):
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
-            if not descargar_clip_vertical(escena["visual"], video_bg):
-                log.error(f"[BG] Fallo stock escena {i+1}")
+            # Generar el video de fondo localmente
+            if not generar_video_fondo_local(video_bg, duracion):
+                log.error(f"[BG] Fallo al generar fondo escena {i+1}")
                 continue
 
             if not procesar_escena_video(audio_path, video_bg, scene_out, duracion):
@@ -230,7 +228,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V10.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V11.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -247,7 +245,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V10.0"}
+    return {"status": "ONLINE", "engine": "Nexus V11.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
