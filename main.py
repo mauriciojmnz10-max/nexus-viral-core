@@ -30,14 +30,14 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V19.0 // Human Voice")
+app = FastAPI(title="Nexus V20.0 // OOM Shield")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (MÁS LARGO)
+# 1. GENERACIÓN DE GUION (7 ESCENAS)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
     log.info(f"[GROQ] Generando guion de 7 escenas para: {tema}")
@@ -87,10 +87,9 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (EDGE-TTS HUMANO CON FALLBACK A gTTS)
+# 2. VOZ (EDGE-TTS HUMANO CON FALLBACK)
 # =============================================================================
 async def generar_audio_edge(texto: str, output_mp3: str):
-    # Voz de Álvaro (España) o puedes usar "es-MX-JorgeNeural" para México
     voice = "es-ES-AlvaroNeural" 
     communicate = edge_tts.Communicate(texto, voice)
     await communicate.save(output_mp3)
@@ -99,19 +98,16 @@ def generar_audio_escena(texto: str, output_wav: str) -> bool:
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
     temp_mp3 = output_wav.replace(".wav", "_temp.mp3")
     
-    # 1. Intentar con Edge-TTS (Voz Humana)
     try:
         asyncio.run(generar_audio_edge(texto, temp_mp3))
-        # Convertir a WAV limpio
         audio = AudioSegment.from_file(temp_mp3, format="mp3")
         audio.export(output_wav, format="wav")
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
         return True
     except Exception as e:
-        log.warning(f"[TTS] Edge-TTS falló: {e}. Usando gTTS (robotica).")
+        log.warning(f"[TTS] Edge-TTS falló: {e}. Usando gTTS.")
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
         
-    # 2. Fallback a gTTS
     try:
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(temp_mp3)
@@ -194,7 +190,7 @@ def unir_audios(audios: list, output_wav: str) -> bool:
         return False
 
 # =============================================================================
-# 5. CONCATENACIÓN FINAL Y SUBTÍTULOS (ESTILO TIKTOK PRO)
+# 5. CONCATENACIÓN FINAL Y SUBTÍTULOS
 # =============================================================================
 def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: str, output_final: str, work_dir: str):
     try:
@@ -211,7 +207,6 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
                     ms = int((sec - int(sec)) * 1000)
                     return f"{h:02}:{m:02}:{s:02},{ms:03}"
                 
-                # Partimos el texto en dos líneas si es muy largo
                 texto = escena['texto']
                 if len(texto) > 18:
                     mid = len(texto) // 2
@@ -227,8 +222,6 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
 
         if os.path.exists(output_final): os.remove(output_final)
         
-        # ESTILO TIKTOK: Letras blancas, borde negro grueso (BorderStyle=1), sin cuadro de fondo.
-        # FontSize=16 (más pequeño para que no tape todo), Alignment=2 (abajo), MarginV=300
         style = "FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=300"
         
         video_mudo_temp = os.path.join(work_dir, "video_mudo.mp4")
@@ -248,7 +241,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
         return False
 
 # =============================================================================
-# 6. LÓGICA DE FONDO
+# 6. LÓGICA DE FONDO (OPTIMIZADA CONTRA OOM)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
@@ -285,6 +278,9 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
             
             videos_procesados.append(scene_out)
 
+            # LIMPIEZA INMEDIATA PARA LIBERAR MEMORIA
+            if os.path.exists(video_bg): os.remove(video_bg)
+
         if not videos_procesados:
             log.error("[BG] No se procesó ningún video.")
             return
@@ -305,7 +301,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V19.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V20.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -321,12 +317,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V19.0"}
-
-@app.post("/generar-tendencias")
-async def generar_tendencias_default(background_tasks: BackgroundTasks):
-    background_tasks.add_task(procesar_video_en_segundo_plano, "Secretos del universo", "misterio")
-    return {"status": "ACCEPTED", "message": "Video en proceso con tema por defecto."}
+    return {"status": "ONLINE", "engine": "Nexus V20.0"}
 
 @app.post("/generar-video")
 async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
