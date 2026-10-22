@@ -25,7 +25,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V7.0 Engine // Unique Workdir")
+app = FastAPI(title="Nexus V8.0 // WAV Engine")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -67,25 +67,38 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (gTTS SÍNCRONO)
+# 2. VOZ (gTTS -> WAV FORZADO)
 # =============================================================================
-def generar_audio_escena(texto: str, output_file: str) -> bool:
+def generar_audio_escena(texto: str, output_wav: str) -> bool:
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
+    temp_mp3 = output_wav.replace(".wav", "_temp.mp3")
+    
     try:
+        # 1. gTTS genera MP3
         tts = gTTS(text=texto, lang='es', slow=False)
-        tts.save(output_file)
+        tts.save(temp_mp3)
         
-        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode != 0 or float(result.stdout.strip()) <= 0:
-            raise Exception("Audio inválido generado por gTTS")
+        # 2. Convertir a WAV forzado (esto limpia cualquier cabecera corrupta)
+        cmd = [
+            "ffmpeg", "-y", "-i", temp_mp3,
+            "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le",
+            output_wav
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, timeout=20)
+        log.info(f"[TTS] Audio convertido a WAV correctamente.")
+        
+        # Limpiar MP3 temporal
+        if os.path.exists(temp_mp3): os.remove(temp_mp3)
         return True
+        
     except Exception as e:
-        log.error(f"[TTS] Error: {e}. Generando silencio de respaldo.")
+        log.error(f"[TTS] Fallo al generar/convertir audio: {e}. Usando silencio.")
+        if os.path.exists(temp_mp3): os.remove(temp_mp3)
+        # Respaldo: WAV de silencio
         try:
             cmd_fallback = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-                "-t", "2", "-acodec", "libmp3lame", output_file
+                "-t", "3", "-c:a", "pcm_s16le", output_wav
             ]
             subprocess.run(cmd_fallback, check=True, capture_output=True)
             return True
@@ -99,7 +112,7 @@ def obtener_duracion_audio(filepath: str) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return float(result.stdout.strip())
     except Exception:
-        return 2.0
+        return 3.0
 
 # =============================================================================
 # 3. DESCARGA DE CLIPS
@@ -127,14 +140,11 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE Y SUBTÍTULOS
+# 4. ENSAMBLAJE (CON WAV LIMPIO)
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
-        # Forzamos la eliminación del archivo de salida si existe
-        if os.path.exists(output):
-            os.remove(output)
-            
+        if os.path.exists(output): os.remove(output)
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", video,
@@ -172,9 +182,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
             for vid in lista_videos:
                 f.write(f"file '{vid}'\n")
 
-        if os.path.exists(output_final):
-            os.remove(output_final)
-
+        if os.path.exists(output_final): os.remove(output_final)
         cmd = [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file,
             "-vf", f"subtitles={srt_file}:force_style='FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3'",
@@ -188,10 +196,9 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. LÓGICA DE FONDO (CON DIRECTORIO ÚNICO)
+# 5. LÓGICA DE FONDO (CON WAV)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str):
-    # Creamos un directorio único para esta ejecución
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
     os.makedirs(work_dir, exist_ok=True)
     log.info(f"[BG] Directorio de trabajo: {work_dir}")
@@ -206,7 +213,8 @@ def procesar_video_en_segundo_plano(tema: str):
         for i, escena in enumerate(escenas):
             log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
             
-            audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
+            # Usamos .wav en lugar de .mp3
+            audio_path = os.path.join(work_dir, f"audio_{i}.wav")
             video_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             scene_out = os.path.join(work_dir, f"scene_{i}.mp4")
 
@@ -237,7 +245,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V7.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V8.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -246,7 +254,6 @@ def procesar_video_en_segundo_plano(tema: str):
     except Exception as e:
         log.error(f"[BG] ERROR: {e}")
     finally:
-        # Limpiamos el directorio único
         if os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -255,11 +262,10 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V7.0"}
+    return {"status": "ONLINE", "engine": "Nexus V8.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
     tema = "Secretos del universo"
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
-    
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
