@@ -26,7 +26,7 @@ CF_GATEWAY_ID = "i-a"
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V3.3 Engine // Ultra-Resilient")
+app = FastAPI(title="Nexus V3.4 Engine // WAV Shield")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -68,32 +68,49 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ Y MEDICIÓN (CON RESPALDO DE EMERGENCIA)
+# 2. VOZ, CONVERSIÓN Y MEDICIÓN
 # =============================================================================
 async def generar_audio_escena(texto: str, output_file: str):
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
+    
+    temp_mp3 = output_file.replace(".wav", "_temp.mp3")
     try:
         communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural")
-        await communicate.save(output_file)
-        
-        # Verificación crítica: si el archivo no existe o está vacío, forzamos error
-        if not os.path.exists(output_file) or os.path.getsize(output_file) < 1000:
-            raise Exception("El archivo de audio está vacío o corrupto.")
-            
-        return True
+        await communicate.save(temp_mp3)
     except Exception as e:
-        log.error(f"[TTS] Fallo Edge-TTS: {e}. Generando audio de respaldo.")
-        # Plan B: Generar un tono de silencio de 3 segundos
+        log.error(f"[TTS] Edge-TTS falló directamente: {e}")
+        temp_mp3 = None
+
+    # Convertir a WAV para limpiar el archivo y evitar el error 183
+    converted = False
+    if temp_mp3 and os.path.exists(temp_mp3) and os.path.getsize(temp_mp3) > 1000:
+        try:
+            cmd = ["ffmpeg", "-y", "-i", temp_mp3, "-ar", "44100", "-ac", "2", output_file]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=15)
+            converted = True
+            log.info(f"[TTS] Audio convertido a WAV correctamente.")
+        except Exception as e:
+            log.error(f"[TTS] Fallo al convertir MP3 a WAV: {e}")
+
+    # Limpiamos el MP3 temporal
+    if temp_mp3 and os.path.exists(temp_mp3):
+        try: os.remove(temp_mp3)
+        except: pass
+
+    # Si falló, generar silencio de respaldo
+    if not converted:
+        log.warning("[TTS] Usando audio de silencio de respaldo.")
         try:
             cmd_fallback = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-                "-t", "3", "-q:a", "9", "-acodec", "libmp3lame", output_file
+                "-t", "3", "-acodec", "pcm_s16le", output_file
             ]
             subprocess.run(cmd_fallback, check=True, capture_output=True)
             return True
         except Exception as fallback_error:
             log.error(f"[TTS] Incluso el respaldo falló: {fallback_error}")
             return False
+    return True
 
 def obtener_duracion_audio(filepath: str) -> float:
     try:
@@ -134,7 +151,6 @@ def descargar_clip_vertical(query: str, output_file: str):
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
-        # Añadimos -err_detect ignore_err para que FFmpeg no colapse si el audio tiene fallos leves
         cmd = [
             "ffmpeg", "-y", 
             "-err_detect", "ignore_err", 
@@ -199,11 +215,12 @@ def procesar_video_en_segundo_plano(tema: str):
         videos_procesados = []
         for i, escena in enumerate(escenas):
             log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
-            audio_path = os.path.join(WORK_DIR, f"audio_{i}.mp3")
+            
+            # IMPORTANTE: Ahora usamos .wav en lugar de .mp3
+            audio_path = os.path.join(WORK_DIR, f"audio_{i}.wav")
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            # Ejecutamos la corrutina de audio de forma segura
             asyncio.run(generar_audio_escena(escena["texto"], audio_path))
             duracion = obtener_duracion_audio(audio_path)
             
@@ -231,7 +248,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.3* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.4* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -247,7 +264,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V3.3"}
+    return {"status": "ONLINE", "engine": "Nexus V3.4"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
@@ -257,7 +274,6 @@ async def generar_video_completo(background_tasks: BackgroundTasks):
     
     tema = "Secretos del universo"
     
-    # Enviamos el trabajo a segundo plano y respondemos a Cron-job al instante
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
