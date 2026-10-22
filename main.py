@@ -27,7 +27,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V15.0 // Smooth Concat")
+app = FastAPI(title="Nexus V16.0 // Normalized Concat")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -147,19 +147,19 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE POR ESCENA (SIN SALTOS)
+# 4. NORMALIZACIÓN DE ESCENA (LA CLAVE)
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
         if os.path.exists(output): os.remove(output)
         
-        # Forzamos un frame rate constante y cortamos el video exacto
+        # Forzamos TODAS las propiedades: 1080x1920, 30fps, sample rate 44100, estéreo
         cmd = [
             "ffmpeg", "-y",
             "-i", video,
             "-i", audio,
             "-t", str(duracion),
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
             "-c:a", "aac", "-ar", "44100", "-ac", "2",
             "-shortest", output
@@ -171,17 +171,17 @@ def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
         return False
 
 # =============================================================================
-# 5. CONCATENACIÓN CON FILTRO (LA CLAVE)
+# 5. CONCATENACIÓN CON DEMUXER (MÁS ESTABLE)
 # =============================================================================
 def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str, work_dir: str):
     try:
+        # Generar SRT
         srt_file = os.path.join(work_dir, "subs.srt")
         current_time = 0.0
         with open(srt_file, "w", encoding="utf-8") as f:
             for i, escena in enumerate(escenas):
                 audio_path = os.path.join(work_dir, f"audio_{i}.wav")
                 duracion_real = obtener_duracion_audio(audio_path)
-                
                 start, end = current_time, current_time + duracion_real
                 
                 def format_time(sec):
@@ -192,31 +192,24 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
                 f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
                 current_time = end
 
+        # Crear archivo de concat con comillas simples (evita errores de ruta)
+        concat_file = os.path.join(work_dir, "concat.txt")
+        with open(concat_file, "w") as f:
+            for vid in lista_videos:
+                f.write(f"file '{vid}'\n")
+
         if os.path.exists(output_final): os.remove(output_final)
         
-        # Construir el filtro de concatenación
-        inputs = []
-        filter_complex = []
-        for i, vid in enumerate(lista_videos):
-            inputs.extend(["-i", vid])
-            filter_complex.append(f"[{i}:v][{i}:a]")
-        
-        filter_str = "".join(filter_complex) + f"concat=n={len(lista_videos)}:v=1:a=1[v][a]"
-        
-        # Estilo TikTok mejorado
         style = "FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=10,MarginV=400"
         
+        # Usamos DEMUXER (f concat) con -c copy, pero como ya normalizamos todo, no debería fallar
         cmd = [
             "ffmpeg", "-y",
-            *inputs,
-            "-filter_complex", filter_str,
-            "-map", "[v]", "-map", "[a]",
+            "-f", "concat", "-safe", "0", "-i", concat_file,
             "-vf", f"subtitles={srt_file}:force_style='{style}'",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-c:a", "aac", "-ar", "44100", "-ac", "2",
-            output_final
+            "-c:a", "aac", output_final
         ]
-        
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
@@ -262,7 +255,7 @@ def procesar_video_en_segundo_plano(tema: str):
             log.error("[BG] No se procesó ningún video.")
             return
 
-        log.info("[BG] Concatenando con filtro (esto puede tardar unos segundos)...")
+        log.info("[BG] Concatenando...")
         video_final = os.path.join(work_dir, "final.mp4")
         if not concatenar_y_subtitular(videos_procesados, escenas, video_final, work_dir):
             log.error("[BG] Fallo concatenación final.")
@@ -272,7 +265,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V15.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V16.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -289,7 +282,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V15.0"}
+    return {"status": "ONLINE", "engine": "Nexus V16.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
