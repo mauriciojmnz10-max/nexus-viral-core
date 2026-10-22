@@ -4,7 +4,6 @@ import logging
 import requests
 import subprocess
 import shutil
-import asyncio
 from gtts import gTTS
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -26,7 +25,7 @@ CF_GATEWAY_ID = "i-a"
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V5.1 // gTTS Engine")
+app = FastAPI(title="Nexus V6.0 Engine // gTTS Sync")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -68,16 +67,16 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (gTTS EN LUGAR DE EDGE-TTS)
+# 2. VOZ (gTTS SÍNCRONO, SIN AWAIT)
 # =============================================================================
-def generar_audio_escena(texto: str, output_file: str):
+def generar_audio_escena(texto: str, output_file: str) -> bool:
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
     try:
-        # gTTS genera un MP3 estándar y compatible
+        # gTTS es síncrono, se ejecuta directamente sin await
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(output_file)
         
-        # Validación con ffprobe
+        # Validación rápida con ffprobe
         cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0 or float(result.stdout.strip()) <= 0:
@@ -87,7 +86,6 @@ def generar_audio_escena(texto: str, output_file: str):
     except Exception as e:
         log.error(f"[TTS] Error: {e}. Generando silencio de respaldo.")
         try:
-            # Respaldo: silencio de 2 segundos
             cmd_fallback = [
                 "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
                 "-t", "2", "-acodec", "libmp3lame", output_file
@@ -187,7 +185,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. LÓGICA DE FONDO
+# 5. LÓGICA DE FONDO (SÍNCRONA, SIN AWAIT)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str):
     try:
@@ -204,6 +202,7 @@ def procesar_video_en_segundo_plano(tema: str):
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
+            # Llamada directa a la función síncrona de gTTS
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
@@ -231,7 +230,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V5.1* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V6.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -247,7 +246,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V5.1"}
+    return {"status": "ONLINE", "engine": "Nexus V6.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
@@ -257,6 +256,7 @@ async def generar_video_completo(background_tasks: BackgroundTasks):
     
     tema = "Secretos del universo"
     
+    # Se añade la tarea síncrona directamente
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
