@@ -9,6 +9,7 @@ from gtts import gTTS
 from pydub import AudioSegment
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # =============================================================================
@@ -27,13 +28,18 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V17.0 // Master Audio")
+app = FastAPI(title="Nexus V18.0 // Pro Studio")
+
+# Modelo de datos para el endpoint
+class VideoRequest(BaseModel):
+    tema: str
+    nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION
+# 1. GENERACIÓN DE GUION (NARRATIVO Y LARGO)
 # =============================================================================
-def generar_guion_estructurado(tema: str) -> list:
-    log.info(f"[GROQ] Generando JSON por escenas para: {tema}")
+def generar_guion_estructurado(tema: str, nicho: str) -> list:
+    log.info(f"[GROQ] Generando guion de 5 escenas para: {tema} (Nicho: {nicho})")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -43,14 +49,23 @@ def generar_guion_estructurado(tema: str) -> list:
     }
     
     prompt = f"""
-    Genera un guion para un video viral de TikTok sobre: '{tema}'.
+    Actúa como un guionista experto en videos virales de TikTok.
+    Genera un guion de 5 escenas sobre: '{tema}', con un tono de {nicho}.
+    
+    REGLAS:
+    1. GANCHO: La primera frase debe enganchar en 3 segundos.
+    2. DESARROLLO: 3 frases cortas que cuenten una mini-historia o dato curioso.
+    3. CIERRE: Una frase final con llamado a la acción (CTA).
+    4. Cada escena debe tener máximo 12 palabras para que quepan en pantalla.
+    
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
-        {{"texto": "Frase del gancho (máx 10 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
-        {{"texto": "Frase del CTA (máx 10 palabras)", "visual": "english prompt for stock video"}}
+        {{"texto": "Gancho (máx 10 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 1 (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 2 (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Desarrollo 3 (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "CTA (máx 10 palabras)", "visual": "english prompt for stock video"}}
       ]
     }}
     """
@@ -147,7 +162,7 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE DE VIDEO MUDO Y AUDIO MAESTRO
+# 4. ENSAMBLAJE DE VIDEO MUDO
 # =============================================================================
 def procesar_escena_video_mudo(video: str, output: str, duracion: float):
     try:
@@ -158,7 +173,7 @@ def procesar_escena_video_mudo(video: str, output: str, duracion: float):
             "-t", str(duracion),
             "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-an", # SIN AUDIO
+            "-an",
             output
         ]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -181,11 +196,10 @@ def unir_audios(audios: list, output_wav: str) -> bool:
         return False
 
 # =============================================================================
-# 5. CONCATENACIÓN FINAL Y SUBTÍTULOS
+# 5. CONCATENACIÓN FINAL Y SUBTÍTULOS ESTILO TIKTOK
 # =============================================================================
 def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: str, output_final: str, work_dir: str):
     try:
-        # Generar SRT
         srt_file = os.path.join(work_dir, "subs.srt")
         current_time = 0.0
         with open(srt_file, "w", encoding="utf-8") as f:
@@ -199,10 +213,15 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
                     ms = int((sec - int(sec)) * 1000)
                     return f"{h:02}:{m:02}:{s:02},{ms:03}"
                 
-                f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
+                # Partimos el texto en dos líneas si es muy largo para que no ocupe toda la pantalla
+                texto = escena['texto']
+                if len(texto) > 20:
+                    mid = len(texto) // 2
+                    texto = texto[:mid] + "\n" + texto[mid:]
+                
+                f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{texto}\n\n")
                 current_time = end
 
-        # Crear archivo de concat
         concat_file = os.path.join(work_dir, "concat.txt")
         with open(concat_file, "w") as f:
             for vid in lista_videos:
@@ -210,18 +229,15 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
 
         if os.path.exists(output_final): os.remove(output_final)
         
-        style = "FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=10,MarginV=400"
+        # ESTILO TIKTOK: Fuente grande, borde grueso, fondo semitransparente (BorderStyle=4)
+        style = "FontSize=26,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=4,Outline=2,Shadow=1,Alignment=10,MarginV=400"
         
-        # 1. Concatenamos los videos mudos
+        # 1. Concatenar videos mudos
         video_mudo_temp = os.path.join(work_dir, "video_mudo.mp4")
-        cmd_concat = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", concat_file,
-            "-c", "copy", video_mudo_temp
-        ]
+        cmd_concat = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file, "-c", "copy", video_mudo_temp]
         subprocess.run(cmd_concat, check=True, capture_output=True)
 
-        # 2. Inyectamos el audio maestro y los subtítulos
+        # 2. Añadir audio y subtítulos
         cmd_final = [
             "ffmpeg", "-y",
             "-i", video_mudo_temp,
@@ -239,13 +255,13 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: st
 # =============================================================================
 # 6. LÓGICA DE FONDO
 # =============================================================================
-def procesar_video_en_segundo_plano(tema: str):
+def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
     os.makedirs(work_dir, exist_ok=True)
     log.info(f"[BG] Directorio de trabajo: {work_dir}")
 
     try:
-        escenas = generar_guion_estructurado(tema)
+        escenas = generar_guion_estructurado(tema, nicho)
         if not escenas:
             log.error("[BG] Guion vacío.")
             return
@@ -268,7 +284,6 @@ def procesar_video_en_segundo_plano(tema: str):
                 log.error(f"[BG] Fallo stock escena {i+1}")
                 continue
 
-            # Procesamos el video SIN audio
             if not procesar_escena_video_mudo(video_bg, scene_out, duracion):
                 log.error(f"[BG] Fallo FFmpeg escena {i+1}")
                 continue
@@ -295,7 +310,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V17.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V18.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -308,14 +323,20 @@ def procesar_video_en_segundo_plano(tema: str):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 # =============================================================================
-# 7. ENDPOINT PRINCIPAL
+# 7. ENDPOINTS
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V17.0"}
+    return {"status": "ONLINE", "engine": "Nexus V18.0"}
 
+# Endpoint antiguo para cron-job (usa valores por defecto)
 @app.post("/generar-tendencias")
-async def generar_video_completo(background_tasks: BackgroundTasks):
-    tema = "Secretos del universo"
-    background_tasks.add_task(procesar_video_en_segundo_plano, tema)
-    return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
+async def generar_tendencias_default(background_tasks: BackgroundTasks):
+    background_tasks.add_task(procesar_video_en_segundo_plano, "Secretos del universo", "misterio")
+    return {"status": "ACCEPTED", "message": "Video en proceso con tema por defecto."}
+
+# NUEVO Endpoint Profesional (Recibe JSON)
+@app.post("/generar-video")
+async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
+    background_tasks.add_task(procesar_video_en_segundo_plano, request.tema, request.nicho)
+    return {"status": "ACCEPTED", "message": f"Video sobre '{request.tema}' en proceso."}
