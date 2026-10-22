@@ -30,20 +30,20 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-# URL de música de fondo libre de derechos (Ambient Cinematic)
+# Música de fondo
 MUSIC_URL = "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3?filename=ambient-piano-amp-strings-10711.mp3"
 
-app = FastAPI(title="Nexus V23.0 // Cinematic")
+app = FastAPI(title="Nexus V25.0 // Two Parts")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (PROMPTS CINEMATOGRÁFICOS)
+# 1. GENERACIÓN DE GUION (6 ESCENAS)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
-    log.info(f"[GROQ] Generando guion cinematográfico para: {tema}")
+    log.info(f"[GROQ] Generando guion de 6 escenas para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -53,27 +53,24 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
     }
     
     prompt = f"""
-    Actúa como un director de cine y guionista experto en TikTok.
-    Genera un guion de 5 escenas sobre: '{tema}', con un tono de {nicho}.
+    Actúa como un guionista experto en videos virales de TikTok.
+    Genera un guion de 6 escenas sobre: '{tema}', con un tono de {nicho}.
     
-    REGLAS DE TEXTO:
-    1. GANCHO: Frase que enganche en 3 segundos.
-    2. DESARROLLO: 3 frases cortas y misteriosas.
-    3. CIERRE: CTA magnético.
-    4. Máximo 15 palabras por escena.
-
-    REGLAS VISUALES (MUY IMPORTANTE):
-    Para el campo "visual", escribe el prompt en INGLÉS para buscar el video en Pixabay.
-    El prompt DEBE incluir términos cinematográficos como: "cinematic, 4k, dramatic lighting, slow motion, high quality, photorealistic".
+    REGLAS:
+    1. GANCHO: La primera frase debe enganchar en 3 segundos.
+    2. DESARROLLO: 4 frases que cuenten la historia.
+    3. CIERRE: Una frase final con llamado a la acción (CTA).
+    4. Cada escena debe tener entre 10 y 15 palabras.
     
-    DEBES responder ÚNICAMENTE con un JSON válido:
+    DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
-        {{"texto": "Frase 1", "visual": "cinematic 4k shot of..."}},
-        {{"texto": "Frase 2", "visual": "dramatic lighting, slow motion of..."}},
-        {{"texto": "Frase 3", "visual": "photorealistic detail of..."}},
-        {{"texto": "Frase 4", "visual": "epic cinematic background of..."}},
-        {{"texto": "Frase 5", "visual": "high quality 4k shot of..."}}
+        {{"texto": "Gancho", "visual": "cinematic 4k shot of..."}},
+        {{"texto": "Desarrollo 1", "visual": "dramatic lighting, slow motion of..."}},
+        {{"texto": "Desarrollo 2", "visual": "photorealistic detail of..."}},
+        {{"texto": "Desarrollo 3", "visual": "epic cinematic background of..."}},
+        {{"texto": "Desarrollo 4", "visual": "high quality 4k shot of..."}},
+        {{"texto": "CTA", "visual": "cinematic closing shot of..."}}
       ]
     }}
     """
@@ -100,25 +97,17 @@ async def generar_audio_edge(texto: str, output_mp3: str):
     await communicate.save(output_mp3)
 
 def generar_audio_escena(texto: str, output_mp3: str) -> bool:
-    log.info(f"[TTS] Generando audio para: {texto[:30]}...")
     try:
         asyncio.run(generar_audio_edge(texto, output_mp3))
         if os.path.getsize(output_mp3) > 1000: return True
-    except Exception as e:
-        log.warning(f"[TTS] Edge-TTS falló: {e}. Usando gTTS.")
-        
+    except Exception:
+        pass
     try:
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(output_mp3)
         return True
-    except Exception as e:
-        log.error(f"[TTS] gTTS falló: {e}. Silencio.")
-        try:
-            silence = AudioSegment.silent(duration=3000)
-            silence.export(output_mp3, format="mp3")
-            return True
-        except Exception:
-            return False
+    except Exception:
+        return False
 
 def obtener_duracion_audio(filepath: str) -> float:
     try:
@@ -129,30 +118,27 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS (PIXABAY + MÚSICA)
+# 3. DESCARGA DE CLIPS Y MÚSICA
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str):
     if PIXABAY_API_KEY:
         try:
             url = "https://pixabay.com/api/videos/"
-            # Buscamos calidad "medium" para equilibrar RAM y calidad visual
             params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
             r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
                 hits = r.json().get("hits", [])
                 if hits:
                     videos = hits[0].get("videos", {})
-                    video_url = videos.get("small", {}).get("url") or videos.get("medium", {}).get("url")
+                    video_url = videos.get("small", {}).get("url")
                     if video_url:
                         with open(output_file, "wb") as f:
                             f.write(requests.get(video_url, timeout=30).content)
                         return True
-        except Exception as e:
-            log.warning(f"[STOCK] Pixabay falló: {e}")
-            
-    log.warning("[STOCK] Generando fondo local.")
+        except Exception:
+            pass
     try:
-        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=720x1280:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
+        cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=480x854:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except Exception:
@@ -165,119 +151,95 @@ def descargar_musica(output_file: str):
             with open(output_file, "wb") as f:
                 f.write(r.content)
             return True
-    except Exception as e:
-        log.warning(f"[MUSIC] Falló la descarga: {e}")
+    except Exception:
+        pass
     return False
 
 # =============================================================================
-# 4. ENSAMBLAJE FINAL (CROSSFADE, MÚSICA Y SUBTÍTULOS)
+# 4. PROCESAMIENTO DE UN BLOQUE (PARTE)
 # =============================================================================
-def procesar_video_final(escenas: list, work_dir: str, output_final: str):
-    try:
-        # 1. Unir Audios
-        log.info("[AUDIO] Uniendo voces...")
-        combined_voz = AudioSegment.empty()
-        for i in range(len(escenas)):
-            audio_file = os.path.join(work_dir, f"audio_{i}.mp3")
-            combined_voz += AudioSegment.from_file(audio_file, format="mp3")
-        voz_maestra = os.path.join(work_dir, "voz_maestra.mp3")
-        combined_voz.export(voz_maestra, format="mp3")
+def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str:
+    """Procesa un bloque de 3 escenas y devuelve la ruta del video generado."""
+    log.info(f"[BLOQUE {num_bloque}] Iniciando procesamiento de {len(escenas_bloque)} escenas...")
+    
+    # 1. Generar Audios
+    audios_paths = []
+    for i, escena in enumerate(escenas_bloque):
+        audio_path = os.path.join(work_dir, f"b{num_bloque}_audio_{i}.mp3")
+        generar_audio_escena(escena["texto"], audio_path)
+        audios_paths.append(audio_path)
 
-        # 2. Mezclar Música de Fondo
-        log.info("[AUDIO] Mezclando música...")
-        music_path = os.path.join(work_dir, "music.mp3")
-        audio_maestro = os.path.join(work_dir, "audio_maestro.mp3")
-        
-        if descargar_musica(music_path):
-            # Bajar volumen de música al 15% y recortar a la duración de la voz
-            cmd_mix = [
-                "ffmpeg", "-y", "-i", voz_maestra, "-stream_loop", "-1", "-i", music_path,
-                "-filter_complex", "[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=3[aout]",
-                "-map", "[aout]", "-c:a", "libmp3lame", "-shortest", audio_maestro
-            ]
-            subprocess.run(cmd_mix, check=True, capture_output=True)
-        else:
-            shutil.copy(voz_maestra, audio_maestro)
+    # 2. Unir Audios del Bloque
+    combined = AudioSegment.empty()
+    for a_path in audios_paths:
+        combined += AudioSegment.from_file(a_path, format="mp3")
+    audio_bloque = os.path.join(work_dir, f"b{num_bloque}_audio.mp3")
+    combined.export(audio_bloque, format="mp3")
 
-        # 3. Generar SRT
-        log.info("[SRT] Generando subtítulos...")
-        srt_file = os.path.join(work_dir, "subs.srt")
-        current_time = 0.0
-        with open(srt_file, "w", encoding="utf-8") as f:
-            for i, escena in enumerate(escenas):
-                audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
-                duracion_real = obtener_duracion_audio(audio_path)
-                start, end = current_time, current_time + duracion_real
-                
-                def format_time(sec):
-                    h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
-                    ms = int((sec - int(sec)) * 1000)
-                    return f"{h:02}:{m:02}:{s:02},{ms:03}"
-                
-                texto = escena['texto']
-                if len(texto) > 18:
-                    mid = len(texto) // 2
-                    texto = texto[:mid] + "\n" + texto[mid:]
-                
-                f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{texto}\n\n")
-                current_time = end
+    # 3. Descargar Videos
+    videos_paths = []
+    for i, escena in enumerate(escenas_bloque):
+        v_path = os.path.join(work_dir, f"b{num_bloque}_bg_{i}.mp4")
+        descargar_clip_vertical(escena["visual"], v_path)
+        videos_paths.append(v_path)
 
-        # 4. FFmpeg Ensamblaje Cinemático (Crossfade)
-        log.info("[FFMPEG] Ensamblando video con transiciones...")
-        inputs = []
-        filter_complex = ""
-        
-        # Entradas de video
-        for i in range(len(escenas)):
-            video_path = os.path.join(work_dir, f"bg_{i}.mp4")
-            audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
-            duracion = obtener_duracion_audio(audio_path)
+    # 4. Generar SRT para el bloque
+    srt_file = os.path.join(work_dir, f"b{num_bloque}_subs.srt")
+    current_time = 0.0
+    with open(srt_file, "w", encoding="utf-8") as f:
+        for i, escena in enumerate(escenas_bloque):
+            duracion = obtener_duracion_audio(audios_paths[i])
+            start, end = current_time, current_time + duracion
+            def format_time(sec):
+                h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
+                ms = int((sec - int(sec)) * 1000)
+                return f"{h:02}:{m:02}:{s:02},{ms:03}"
             
-            inputs.extend(["-i", video_path])
-            # Escalar, cortar y preparar cada clip
-            filter_complex += f"[{i}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=30,setsar=1,trim=duration={duracion},setpts=PTS-STARTPTS[v{i}];"
-
-        # Aplicar Crossfade (Transiciones suaves)
-        # xfade necesita la duración exacta de cada clip y el offset (inicio de la transición)
-        current_offset = 0.0
-        last_output = "v0"
-        
-        for i in range(1, len(escenas)):
-            audio_path = os.path.join(work_dir, f"audio_{i-1}.mp3")
-            duracion_prev = obtener_duracion_audio(audio_path)
-            current_offset += (duracion_prev - 0.5) # 0.5 seg de transición
+            texto = escena['texto']
+            if len(texto) > 18:
+                mid = len(texto) // 2
+                texto = texto[:mid] + "\n" + texto[mid:]
             
-            out_name = f"vx{i}"
-            # xfade=transition=fade:duration=0.5:offset=X
-            filter_complex += f"[{last_output}][v{i}]xfade=transition=fade:duration=0.5:offset={current_offset}[{out_name}];"
-            last_output = out_name
+            f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{texto}\n\n")
+            current_time = end
 
-        # Añadir subtítulos al último video
-        style = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200"
-        filter_complex += f"[{last_output}]subtitles={srt_file}:force_style='{style}'[vout]"
+    # 5. Ensamblar Bloque con FFmpeg (mínimo consumo)
+    inputs = []
+    filter_complex = ""
+    for i in range(len(escenas_bloque)):
+        inputs.extend(["-i", videos_paths[i]])
+        duracion = obtener_duracion_audio(audios_paths[i])
+        filter_complex += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={duracion},setpts=PTS-STARTPTS[v{i}];"
 
-        cmd = [
-            "ffmpeg", "-y",
-            *inputs,
-            "-i", audio_maestro,
-            "-filter_complex", filter_complex,
-            "-map", "[vout]", "-map", f"{len(escenas)}:a",
-            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-c:a", "aac", "-shortest",
-            output_final
-        ]
-        
-        subprocess.run(cmd, check=True, capture_output=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        log.error(f"[FFMPEG] Error: {e.stderr.decode()[:500]}")
-        return False
-    except Exception as e:
-        log.error(f"[FFMPEG] Error inesperado: {e}")
-        return False
+    concat_inputs = "".join([f"[v{i}]" for i in range(len(escenas_bloque))])
+    filter_complex += f"{concat_inputs}concat=n={len(escenas_bloque)}:v=1:a=0[v];"
+    
+    style = "FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=150"
+    filter_complex += f"[v]subtitles={srt_file}:force_style='{style}'[vout]"
+
+    bloque_out = os.path.join(work_dir, f"parte_{num_bloque}.mp4")
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-i", audio_bloque,
+        "-filter_complex", filter_complex,
+        "-map", "[vout]", "-map", f"{len(escenas_bloque)}:a",
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+        "-c:a", "aac", "-shortest",
+        bloque_out
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    
+    # Limpieza de archivos intermedios de este bloque para liberar RAM
+    for path in audios_paths + videos_paths:
+        if os.path.exists(path): os.remove(path)
+    if os.path.exists(audio_bloque): os.remove(audio_bloque)
+
+    log.info(f"[BLOQUE {num_bloque}] Completado con éxito.")
+    return bloque_out
 
 # =============================================================================
-# 5. LÓGICA DE FONDO
+# 5. ORQUESTADOR PRINCIPAL
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
@@ -286,33 +248,52 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
     try:
         escenas = generar_guion_estructurado(tema, nicho)
-        if not escenas:
-            log.error("[BG] Guion vacío.")
+        if len(escenas) < 6:
+            log.error("[BG] Guion incompleto.")
             return
 
-        for i, escena in enumerate(escenas):
-            log.info(f"[BG] Preparando Escena {i+1}/{len(escenas)}...")
-            
-            audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
-            video_bg = os.path.join(work_dir, f"bg_{i}.mp4")
+        # Dividir en dos bloques de 3 escenas
+        bloque_1 = escenas[:3]
+        bloque_2 = escenas[3:6]
 
-            generar_audio_escena(escena["texto"], audio_path)
-            
-            if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg):
-                log.error(f"[BG] Fallo stock escena {i+1}")
-                return
+        # FASE 1: Primer bloque (15s)
+        video_1 = procesar_bloque(bloque_1, 1, work_dir)
+        
+        # FASE 2: Segundo bloque (15s)
+        video_2 = procesar_bloque(bloque_2, 2, work_dir)
 
-        log.info("[BG] Ensamblando video final...")
+        # FASE 3: Unir ambos bloques con un comando ultra ligero
+        log.info("[BG] Uniendo partes...")
         video_final = os.path.join(work_dir, "final.mp4")
-        if not procesar_video_final(escenas, work_dir, video_final):
-            log.error("[BG] Fallo en el ensamblaje final.")
-            return
+        lista_unir = os.path.join(work_dir, "lista.txt")
+        with open(lista_unir, "w") as f:
+            f.write(f"file '{video_1}'\n")
+            f.write(f"file '{video_2}'\n")
+        
+        # Usamos -c copy: FFmpeg no re-encodea, solo pega los archivos (Cero consumo de RAM)
+        cmd_unir = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lista_unir, "-c", "copy", video_final]
+        subprocess.run(cmd_unir, check=True, capture_output=True)
+
+        # Añadir Música de Fondo al video final
+        log.info("[BG] Añadiendo música...")
+        music_path = os.path.join(work_dir, "music.mp3")
+        video_con_musica = os.path.join(work_dir, "final_music.mp4")
+        
+        if descargar_musica(music_path):
+            # Mezclar audio original del video con la música
+            cmd_music = [
+                "ffmpeg", "-y", "-i", video_final, "-stream_loop", "-1", "-i", music_path,
+                "-filter_complex", "[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first[aout]",
+                "-map", "0:v", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-shortest", video_con_musica
+            ]
+            subprocess.run(cmd_music, check=True, capture_output=True)
+            video_final = video_con_musica
 
         log.info("[BG] Enviando a Telegram...")
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V23.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n🎵 Música: ON\n✨ Transiciones: ON"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V25.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n🎵 Música: ON"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -328,7 +309,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V23.0"}
+    return {"status": "ONLINE", "engine": "Nexus V25.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
