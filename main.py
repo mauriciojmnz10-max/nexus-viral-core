@@ -30,20 +30,20 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-# Música de fondo
+# Música de fondo (Pixabay Audio)
 MUSIC_URL = "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3?filename=ambient-piano-amp-strings-10711.mp3"
 
-app = FastAPI(title="Nexus V25.0 // Two Parts")
+app = FastAPI(title="Nexus V26.0 // TikTok Monetization")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (6 ESCENAS)
+# 1. GENERACIÓN DE GUION (12 ESCENAS PARA 4 BLOQUES)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
-    log.info(f"[GROQ] Generando guion de 6 escenas para: {tema}")
+    log.info(f"[GROQ] Generando guion de 12 escenas para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -54,23 +54,30 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
     
     prompt = f"""
     Actúa como un guionista experto en videos virales de TikTok.
-    Genera un guion de 6 escenas sobre: '{tema}', con un tono de {nicho}.
+    Genera un guion de 12 escenas (dividido en 4 partes lógicas) sobre: '{tema}', con un tono de {nicho}.
     
     REGLAS:
-    1. GANCHO: La primera frase debe enganchar en 3 segundos.
-    2. DESARROLLO: 4 frases que cuenten la historia.
-    3. CIERRE: Una frase final con llamado a la acción (CTA).
-    4. Cada escena debe tener entre 10 y 15 palabras.
+    1. GANCHO (Escena 1): Enganchar en 3 segundos.
+    2. INTRO (Escenas 2-3): Contexto rápido.
+    3. DESARROLLO (Escenas 4-9): La historia o datos curiosos (2 por escena).
+    4. CIERRE (Escenas 10-12): Conclusión y CTA.
+    5. Cada escena debe tener entre 10 y 14 palabras exactas para durar ~4 segundos.
     
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
     {{
       "escenas": [
         {{"texto": "Gancho", "visual": "cinematic 4k shot of..."}},
-        {{"texto": "Desarrollo 1", "visual": "dramatic lighting, slow motion of..."}},
-        {{"texto": "Desarrollo 2", "visual": "photorealistic detail of..."}},
-        {{"texto": "Desarrollo 3", "visual": "epic cinematic background of..."}},
-        {{"texto": "Desarrollo 4", "visual": "high quality 4k shot of..."}},
-        {{"texto": "CTA", "visual": "cinematic closing shot of..."}}
+        {{"texto": "Intro 1", "visual": "dramatic lighting, slow motion of..."}},
+        {{"texto": "Intro 2", "visual": "photorealistic detail of..."}},
+        {{"texto": "Desarrollo 1", "visual": "epic cinematic background of..."}},
+        {{"texto": "Desarrollo 2", "visual": "high quality 4k shot of..."}},
+        {{"texto": "Desarrollo 3", "visual": "cinematic close up of..."}},
+        {{"texto": "Desarrollo 4", "visual": "dramatic slow motion of..."}},
+        {{"texto": "Desarrollo 5", "visual": "atmospheric 4k shot of..."}},
+        {{"texto": "Desarrollo 6", "visual": "photorealistic background of..."}},
+        {{"texto": "Cierre 1", "visual": "cinematic shot of..."}},
+        {{"texto": "Cierre 2", "visual": "dramatic lighting of..."}},
+        {{"texto": "CTA", "visual": "epic final shot of..."}}
       ]
     }}
     """
@@ -118,7 +125,7 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS Y MÚSICA
+# 3. DESCARGA DE CLIPS
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str):
     if PIXABAY_API_KEY:
@@ -159,31 +166,26 @@ def descargar_musica(output_file: str):
 # 4. PROCESAMIENTO DE UN BLOQUE (PARTE)
 # =============================================================================
 def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str:
-    """Procesa un bloque de 3 escenas y devuelve la ruta del video generado."""
-    log.info(f"[BLOQUE {num_bloque}] Iniciando procesamiento de {len(escenas_bloque)} escenas...")
+    log.info(f"[BLOQUE {num_bloque}] Procesando {len(escenas_bloque)} escenas...")
     
-    # 1. Generar Audios
     audios_paths = []
     for i, escena in enumerate(escenas_bloque):
         audio_path = os.path.join(work_dir, f"b{num_bloque}_audio_{i}.mp3")
         generar_audio_escena(escena["texto"], audio_path)
         audios_paths.append(audio_path)
 
-    # 2. Unir Audios del Bloque
     combined = AudioSegment.empty()
     for a_path in audios_paths:
         combined += AudioSegment.from_file(a_path, format="mp3")
     audio_bloque = os.path.join(work_dir, f"b{num_bloque}_audio.mp3")
     combined.export(audio_bloque, format="mp3")
 
-    # 3. Descargar Videos
     videos_paths = []
     for i, escena in enumerate(escenas_bloque):
         v_path = os.path.join(work_dir, f"b{num_bloque}_bg_{i}.mp4")
         descargar_clip_vertical(escena["visual"], v_path)
         videos_paths.append(v_path)
 
-    # 4. Generar SRT para el bloque
     srt_file = os.path.join(work_dir, f"b{num_bloque}_subs.srt")
     current_time = 0.0
     with open(srt_file, "w", encoding="utf-8") as f:
@@ -203,7 +205,6 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
             f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{texto}\n\n")
             current_time = end
 
-    # 5. Ensamblar Bloque con FFmpeg (mínimo consumo)
     inputs = []
     filter_complex = ""
     for i in range(len(escenas_bloque)):
@@ -230,16 +231,15 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
     ]
     subprocess.run(cmd, check=True, capture_output=True)
     
-    # Limpieza de archivos intermedios de este bloque para liberar RAM
     for path in audios_paths + videos_paths:
         if os.path.exists(path): os.remove(path)
     if os.path.exists(audio_bloque): os.remove(audio_bloque)
 
-    log.info(f"[BLOQUE {num_bloque}] Completado con éxito.")
+    log.info(f"[BLOQUE {num_bloque}] Completado.")
     return bloque_out
 
 # =============================================================================
-# 5. ORQUESTADOR PRINCIPAL
+# 5. ORQUESTADOR PRINCIPAL (4 BLOQUES DE 16s)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
@@ -248,29 +248,26 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
     try:
         escenas = generar_guion_estructurado(tema, nicho)
-        if len(escenas) < 6:
-            log.error("[BG] Guion incompleto.")
+        if len(escenas) < 12:
+            log.error("[BG] Guion incompleto. Se necesitan 12 escenas.")
             return
 
-        # Dividir en dos bloques de 3 escenas
-        bloque_1 = escenas[:3]
-        bloque_2 = escenas[3:6]
+        # Dividir en 4 bloques de 3 escenas cada uno
+        bloques = [escenas[i:i+3] for i in range(0, 12, 3)]
 
-        # FASE 1: Primer bloque (15s)
-        video_1 = procesar_bloque(bloque_1, 1, work_dir)
-        
-        # FASE 2: Segundo bloque (15s)
-        video_2 = procesar_bloque(bloque_2, 2, work_dir)
+        partes_generadas = []
+        for idx, bloque in enumerate(bloques, start=1):
+            parte = procesar_bloque(bloque, idx, work_dir)
+            partes_generadas.append(parte)
 
-        # FASE 3: Unir ambos bloques con un comando ultra ligero
-        log.info("[BG] Uniendo partes...")
+        # Unir las 4 partes con -c copy (Cero consumo de RAM)
+        log.info("[BG] Uniendo las 4 partes...")
         video_final = os.path.join(work_dir, "final.mp4")
         lista_unir = os.path.join(work_dir, "lista.txt")
         with open(lista_unir, "w") as f:
-            f.write(f"file '{video_1}'\n")
-            f.write(f"file '{video_2}'\n")
+            for p in partes_generadas:
+                f.write(f"file '{p}'\n")
         
-        # Usamos -c copy: FFmpeg no re-encodea, solo pega los archivos (Cero consumo de RAM)
         cmd_unir = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lista_unir, "-c", "copy", video_final]
         subprocess.run(cmd_unir, check=True, capture_output=True)
 
@@ -280,7 +277,6 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         video_con_musica = os.path.join(work_dir, "final_music.mp4")
         
         if descargar_musica(music_path):
-            # Mezclar audio original del video con la música
             cmd_music = [
                 "ffmpeg", "-y", "-i", video_final, "-stream_loop", "-1", "-i", music_path,
                 "-filter_complex", "[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first[aout]",
@@ -293,7 +289,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V25.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n🎵 Música: ON"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V26.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n⏱️ Duración: ~64s (Apto para monetización)"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -309,14 +305,14 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V25.0"}
+    return {"status": "ONLINE", "engine": "Nexus V26.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
     background_tasks.add_task(procesar_video_en_segundo_plano, "Secretos del universo", "misterio")
-    return {"status": "ACCEPTED", "message": "Video en proceso."}
+    return {"status": "ACCEPTED", "message": "Video de 64s en proceso."}
 
 @app.post("/generar-video")
 async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(procesar_video_en_segundo_plano, request.tema, request.nicho)
-    return {"status": "ACCEPTED", "message": f"Video sobre '{request.tema}' en proceso."}
+    return {"status": "ACCEPTED", "message": f"Video de 64s sobre '{request.tema}' en proceso."}
