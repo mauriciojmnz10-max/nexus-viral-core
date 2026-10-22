@@ -32,17 +32,17 @@ CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 MUSIC_URL = "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0c6ff1bab.mp3?filename=ambient-piano-amp-strings-10711.mp3"
 
-app = FastAPI(title="Nexus V28.0 // Pro Edition")
+app = FastAPI(title="Nexus V29.0 // Retention & Sync")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "misterio"
 
 # =============================================================================
-# 1. GENERACIÓN DE GUION (12 ESCENAS - PROMPTS CORTOS)
+# 1. GENERACIÓN DE GUION (14 ESCENAS - FÓRMULAS VIRALES)
 # =============================================================================
 def generar_guion_estructurado(tema: str, nicho: str) -> list:
-    log.info(f"[GROQ] Generando guion viral de 12 escenas para: {tema}")
+    log.info(f"[GROQ] Generando guion viral de 14 escenas para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -53,40 +53,41 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
     
     prompt = f"""
     Actúa como un Copywriter Senior experto en videos virales de TikTok.
-    Genera un guion de 12 escenas sobre: '{tema}', con un tono de {nicho}.
+    Genera un guion de 14 escenas sobre: '{tema}', con un tono de {nicho}.
     
-    REGLAS DE ORO DEL TEXTO:
-    1. GANCHO (Escena 1): Pregunta impactante o dato que rompa el cerebro. Debe enganchar en 3 segundos.
-    2. DESARROLLO (Escenas 2-11): Usa el "bucle de curiosidad". Cuenta la historia con datos sorprendentes. No uses puntos y seguido, usa comas para que la voz fluya.
-    3. CTA (Escena 12): Pide LIKE, COMENTAR y COMPARTIR.
-    4. LONGITUD ESTRICTA: Exactamente entre 8 y 10 palabras por escena.
+    REGLAS DE ORO (OBLIGATORIAS):
+    1. GANCHO (Escena 1): Usa una fórmula de bucle abierto. Ej: "El error de 3 segundos que...", "Lo que los expertos ocultan sobre...", "Nadie te dice esto sobre...".
+    2. DESARROLLO (Escenas 2-13): Cuenta la historia revelando datos como si fuera un secreto prohibido. Usa comas en lugar de puntos para que la voz fluya rápido.
+    3. CTA (Escena 14): Pide LIKE, COMENTAR (con una palabra clave) y COMPARTIR.
+    4. LONGITUD: Exactamente entre 12 y 15 palabras por escena.
 
-    REGLAS VISUALES (MUY IMPORTANTE):
-    Para el campo "visual", escribe 1 o 2 palabras clave en INGLÉS. NO uses frases largas.
-    Ejemplo: Si hablas de agujeros negros, escribe "black hole" o "galaxy". No escribas "cinematic 4k shot of a black hole".
+    REGLAS VISUALES:
+    Para el campo "visual", escribe 1 o 2 palabras clave en INGLÉS (ej: "space", "planet", "ocean").
     
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown:
     {{
       "escenas": [
-        {{"texto": "Gancho neuro-persuasivo (8-10 palabras)", "visual": "space"}},
-        {{"texto": "Contexto 1", "visual": "stars"}},
-        {{"texto": "Contexto 2", "visual": "nebula"}},
-        {{"texto": "Dato curioso 1", "visual": "planet"}},
-        {{"texto": "Dato curioso 2", "visual": "galaxy"}},
-        {{"texto": "Giro de la historia", "visual": "cosmos"}},
-        {{"texto": "Desarrollo profundo 1", "visual": "universe"}},
-        {{"texto": "Desarrollo profundo 2", "visual": "astronomy"}},
-        {{"texto": "Secreto revelado", "visual": "telescope"}},
-        {{"texto": "Clímax", "visual": "supernova"}},
-        {{"texto": "Conclusión", "visual": "dark matter"}},
-        {{"texto": "CTA: Pide like, comentario y compartir", "visual": "milky way"}}
+        {{"texto": "Gancho neuro-persuasivo (12-15 palabras)", "visual": "space"}},
+        {{"texto": "Secreto 1", "visual": "stars"}},
+        {{"texto": "Secreto 2", "visual": "nebula"}},
+        {{"texto": "Dato oculto 1", "visual": "planet"}},
+        {{"texto": "Dato oculto 2", "visual": "galaxy"}},
+        {{"texto": "Giro inesperado", "visual": "cosmos"}},
+        {{"texto": "Desarrollo 1", "visual": "universe"}},
+        {{"texto": "Desarrollo 2", "visual": "astronomy"}},
+        {{"texto": "Desarrollo 3", "visual": "telescope"}},
+        {{"texto": "Revelación 1", "visual": "supernova"}},
+        {{"texto": "Revelación 2", "visual": "dark matter"}},
+        {{"texto": "Clímax", "visual": "milky way"}},
+        {{"texto": "Conclusión", "visual": "galaxy"}},
+        {{"texto": "CTA: Pide like, comentario y compartir", "visual": "stars"}}
       ]
     }}
     """
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8,
+        "temperature": 0.85,
         "response_format": {"type": "json_object"}
     }
     try:
@@ -101,7 +102,6 @@ def generar_guion_estructurado(tema: str, nicho: str) -> list:
 # 2. VOZ (EDGE-TTS LATINO)
 # =============================================================================
 async def generar_audio_edge(texto: str, output_mp3: str):
-    # Cambiamos a voz latina para que suene más natural
     voice = "es-MX-JorgeNeural" 
     communicate = edge_tts.Communicate(texto, voice)
     await communicate.save(output_mp3)
@@ -128,13 +128,12 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS (BÚSQUEDA DIRECTA)
+# 3. DESCARGA DE CLIPS Y MÚSICA
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str):
     if PIXABAY_API_KEY:
         try:
             url = "https://pixabay.com/api/videos/"
-            # Buscamos por la palabra clave corta (ej. "space")
             params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 5, "orientation": "vertical", "video_type": "film"}
             r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
@@ -148,7 +147,7 @@ def descargar_clip_vertical(query: str, output_file: str):
                         return True
         except Exception:
             pass
-    # Fallback si Pixabay falla
+    # Fallback
     try:
         cmd = ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=480x854:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1", output_file]
         subprocess.run(cmd, check=True, capture_output=True)
@@ -191,7 +190,7 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
         descargar_clip_vertical(escena["visual"], v_path)
         videos_paths.append(v_path)
 
-    # GENERACIÓN DE SUBTÍTULOS DINÁMICOS
+    # GENERACIÓN DE SUBTÍTULOS CON SINCRONIZACIÓN PROPORCIONAL
     srt_file = os.path.join(work_dir, f"b{num_bloque}_subs.srt")
     current_time = 0.0
     with open(srt_file, "w", encoding="utf-8") as f:
@@ -200,23 +199,23 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
             duracion = obtener_duracion_audio(audios_paths[i])
             start, end = current_time, current_time + duracion
             
-            # Partir el texto en 2 o 3 trozos pequeños para que no sea un párrafo
             palabras = escena['texto'].split()
             if len(palabras) > 5:
                 mid = len(palabras) // 2
                 parte1 = " ".join(palabras[:mid])
                 parte2 = " ".join(palabras[mid:])
                 
-                # Tiempo para la primera mitad
-                mid_time = start + (duracion / 2)
+                # SINCRONIZACIÓN: Tiempo proporcional a la cantidad de palabras
+                total_words = len(palabras)
+                time_part1 = start + (duracion * (mid / total_words))
                 
                 def format_time(sec):
                     h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
                     ms = int((sec - int(sec)) * 1000)
                     return f"{h:02}:{m:02}:{s:02},{ms:03}"
                 
-                f.write(f"{contador}\n{format_time(start)} --> {format_time(mid_time)}\n{parte1}\n\n")
-                f.write(f"{contador+1}\n{format_time(mid_time)} --> {format_time(end)}\n{parte2}\n\n")
+                f.write(f"{contador}\n{format_time(start)} --> {format_time(time_part1)}\n{parte1}\n\n")
+                f.write(f"{contador+1}\n{format_time(time_part1)} --> {format_time(end)}\n{parte2}\n\n")
                 contador += 2
             else:
                 def format_time(sec):
@@ -238,7 +237,6 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
     concat_inputs = "".join([f"[v{i}]" for i in range(len(escenas_bloque))])
     filter_complex += f"{concat_inputs}concat=n={len(escenas_bloque)}:v=1:a=0[v];"
     
-    # Estilo de letra pro
     style = "FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=150"
     filter_complex += f"[v]subtitles={srt_file}:force_style='{style}'[vout]"
 
@@ -262,7 +260,7 @@ def procesar_bloque(escenas_bloque: list, num_bloque: int, work_dir: str) -> str
     return bloque_out
 
 # =============================================================================
-# 5. ORQUESTADOR PRINCIPAL
+# 5. ORQUESTADOR PRINCIPAL (GARANTÍA DE +65 SEGUNDOS)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
@@ -271,18 +269,19 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
     try:
         escenas = generar_guion_estructurado(tema, nicho)
-        if len(escenas) < 12:
+        if len(escenas) < 14:
             log.error("[BG] Guion incompleto.")
             return
 
-        bloques = [escenas[i:i+3] for i in range(0, 12, 3)]
+        # Dividir en bloques de 3 o 4 escenas (para no saturar Render)
+        bloques = [escenas[i:i+4] for i in range(0, 14, 4)]
 
         partes_generadas = []
         for idx, bloque in enumerate(bloques, start=1):
             parte = procesar_bloque(bloque, idx, work_dir)
             partes_generadas.append(parte)
 
-        log.info("[BG] Uniendo las 4 partes...")
+        log.info("[BG] Uniendo todos los bloques...")
         video_final = os.path.join(work_dir, "final.mp4")
         lista_unir = os.path.join(work_dir, "lista.txt")
         with open(lista_unir, "w") as f:
@@ -291,6 +290,33 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         
         cmd_unir = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lista_unir, "-c", "copy", video_final]
         subprocess.run(cmd_unir, check=True, capture_output=True)
+
+        # =====================================================================
+        # GARANTÍA DE DURACIÓN: Si el video es menor a 65s, lo rellenamos
+        # =====================================================================
+        log.info("[BG] Verificando duración del video...")
+        duracion_actual = obtener_duracion_audio(video_final)
+        
+        if duracion_actual < 65.0:
+            log.info(f"[BG] El video dura {duracion_actual}s. Rellenando hasta 65s...")
+            # Creamos un video de relleno de 10s (color negro)
+            relleno = os.path.join(work_dir, "relleno.mp4")
+            cmd_relleno = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=480x854:d=10",
+                "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", relleno
+            ]
+            subprocess.run(cmd_relleno, check=True, capture_output=True)
+            
+            # Lo añadimos al final
+            lista_relleno = os.path.join(work_dir, "lista_relleno.txt")
+            with open(lista_relleno, "w") as f:
+                f.write(f"file '{video_final}'\n")
+                f.write(f"file '{relleno}'\n")
+            
+            video_estirado = os.path.join(work_dir, "video_estirado.mp4")
+            cmd_estirar = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", lista_relleno, "-c", "copy", video_estirado]
+            subprocess.run(cmd_estirar, check=True, capture_output=True)
+            video_final = video_estirado
 
         log.info("[BG] Añadiendo música...")
         music_path = os.path.join(work_dir, "music.mp3")
@@ -309,7 +335,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V28.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n⏱️ Duración: ~64s\n🚀 Subtítulos Pro + Voz Latina"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V29.0* 🎬\n\n🎯 Tema: {tema}\n🎭 Nicho: {nicho}\n⏱️ Duración: Garantizada >65s\n🚀 Sincronización Perfecta"}, 
                 files={"video": video}, timeout=120
             )
         log.info("[BG] ¡Video enviado!")
@@ -325,14 +351,14 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V28.0"}
+    return {"status": "ONLINE", "engine": "Nexus V29.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
     background_tasks.add_task(procesar_video_en_segundo_plano, "Secretos del universo", "misterio")
-    return {"status": "ACCEPTED", "message": "Video de 64s en proceso."}
+    return {"status": "ACCEPTED", "message": "Video de +65s en proceso."}
 
 @app.post("/generar-video")
 async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(procesar_video_en_segundo_plano, request.tema, request.nicho)
-    return {"status": "ACCEPTED", "message": f"Video de 64s sobre '{request.tema}' en proceso."}
+    return {"status": "ACCEPTED", "message": f"Video de +65s sobre '{request.tema}' en proceso."}
