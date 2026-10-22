@@ -30,7 +30,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V20.0 // OOM Shield")
+app = FastAPI(title="Nexus V20.0 // Pro Studio")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -318,6 +318,11 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 @app.get("/")
 async def root():
     return {"status": "ONLINE", "engine": "Nexus V20.0"}
+
+@app.post("/generar-tendencias")
+async def generar_tendencias_default(background_tasks: BackgroundTasks):
+    background_tasks.add_task(procesar_video_en_segundo_plano, "Secretos del universo", "misterio")
+    return {"status": "ACCEPTED", "message": "Video en proceso con tema por defecto."}
 
 @app.post("/generar-video")
 async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
