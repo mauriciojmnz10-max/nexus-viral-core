@@ -1,11 +1,11 @@
 import os
 import json
 import logging
-import edge_tts
 import requests
 import subprocess
 import shutil
 import asyncio
+from gtts import gTTS
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -26,7 +26,7 @@ CF_GATEWAY_ID = "i-a"
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V4.0 Engine // Audio Fix")
+app = FastAPI(title="Nexus V5.1 // gTTS Engine")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -68,56 +68,35 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ (GENERACIÓN DIRECTA A WAV CON FFMPEG, SIN EDGE-TTS MP3)
+# 2. VOZ (gTTS EN LUGAR DE EDGE-TTS)
 # =============================================================================
-async def generar_audio_escena(texto: str, output_file: str):
+def generar_audio_escena(texto: str, output_file: str):
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
-    temp_mp3 = output_file.replace(".wav", "_temp.mp3")
     try:
-        # 1. Generar MP3 con edge-tts
-        communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural")
-        await communicate.save(temp_mp3)
+        # gTTS genera un MP3 estándar y compatible
+        tts = gTTS(text=texto, lang='es', slow=False)
+        tts.save(output_file)
         
-        # 2. Convertir INMEDIATAMENTE a WAV usando FFmpeg con parámetros explícitos
-        # Esto repara cualquier cabecera corrupta del MP3
-        cmd_convert = [
-            "ffmpeg", "-y",
-            "-i", temp_mp3,
-            "-ar", "44100",       # Frecuencia de muestreo estándar
-            "-ac", "2",           # Estéreo
-            "-c:a", "pcm_s16le",  # Códec PCM sin compresión (WAV puro)
-            output_file
-        ]
-        subprocess.run(cmd_convert, check=True, capture_output=True, timeout=20)
-        log.info(f"[TTS] Audio convertido a WAV correctamente.")
-        
-        # Limpiar MP3 temporal
-        if os.path.exists(temp_mp3): os.remove(temp_mp3)
-        return True
-        
-    except subprocess.CalledProcessError as e:
-        log.error(f"[TTS] Fallo FFmpeg al convertir audio: {e.stderr.decode()[:200]}")
-        # Si falla la conversión, generamos silencio de respaldo
-        if os.path.exists(temp_mp3): os.remove(temp_mp3)
-        return generar_silencio_respaldo(output_file)
-    except Exception as e:
-        log.error(f"[TTS] Error general: {e}")
-        if os.path.exists(temp_mp3): os.remove(temp_mp3)
-        return generar_silencio_respaldo(output_file)
-
-def generar_silencio_respaldo(output_file: str):
-    """Genera un WAV de silencio de 3 segundos como último recurso."""
-    log.warning("[TTS] Generando silencio de respaldo.")
-    try:
-        cmd = [
-            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-            "-t", "3", "-acodec", "pcm_s16le", output_file
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        # Validación con ffprobe
+        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0 or float(result.stdout.strip()) <= 0:
+            raise Exception("Audio inválido generado por gTTS")
+            
         return True
     except Exception as e:
-        log.error(f"[TTS] Respaldo falló: {e}")
-        return False
+        log.error(f"[TTS] Error: {e}. Generando silencio de respaldo.")
+        try:
+            # Respaldo: silencio de 2 segundos
+            cmd_fallback = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", "2", "-acodec", "libmp3lame", output_file
+            ]
+            subprocess.run(cmd_fallback, check=True, capture_output=True)
+            return True
+        except Exception as fallback_error:
+            log.error(f"[TTS] Respaldo falló: {fallback_error}")
+            return False
 
 def obtener_duracion_audio(filepath: str) -> float:
     try:
@@ -125,7 +104,7 @@ def obtener_duracion_audio(filepath: str) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return float(result.stdout.strip())
     except Exception:
-        return 3.0
+        return 2.0
 
 # =============================================================================
 # 3. DESCARGA DE CLIPS
@@ -154,7 +133,7 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE (FFMPEG SIN TOLERANCIA, PERO CON WAV LIMPIO)
+# 4. ENSAMBLAJE Y SUBTÍTULOS
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
@@ -221,12 +200,11 @@ def procesar_video_en_segundo_plano(tema: str):
         for i, escena in enumerate(escenas):
             log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
             
-            audio_path = os.path.join(WORK_DIR, f"audio_{i}.wav")
+            audio_path = os.path.join(WORK_DIR, f"audio_{i}.mp3")
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            # Generar audio (ahora es WAV puro, sin MP3 corrupto)
-            asyncio.run(generar_audio_escena(escena["texto"], audio_path))
+            generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
             if not descargar_clip_vertical(escena["visual"], video_bg):
@@ -253,7 +231,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V4.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V5.1* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -269,7 +247,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V4.0"}
+    return {"status": "ONLINE", "engine": "Nexus V5.1"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
