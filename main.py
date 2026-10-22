@@ -1,190 +1,226 @@
 import os
+import json
 import logging
 import edge_tts
 import requests
 import subprocess
+import shutil
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # CONFIGURACIÓN
-# -----------------------------------------------------------------------------
+# =============================================================================
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nexus")
 
-# Credenciales principales
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 
-# Cloudflare AI Gateway (Ya configurado con tus datos)
+# Cloudflare Gateway
 CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-GROQ_MODEL = "openai/gpt-oss-120b"
-app = FastAPI(title="Nexus Engine // Gateway")
+WORK_DIR = "/tmp/nexus_work"
+app = FastAPI(title="Nexus V3.1 Engine")
 
-# -----------------------------------------------------------------------------
-# 1. GENERAR GUION CON GROQ (Vía Cloudflare)
-# -----------------------------------------------------------------------------
-def generar_guion(tema: str) -> str:
-    log.info(f"[GROQ] Iniciando petición para: {tema}")
-    if not GROQ_API_KEY:
-        log.error("[GROQ] API Key está vacía.")
-        return None
-        
-    # URL del Gateway de Cloudflare
+# =============================================================================
+# 1. GENERACIÓN DE GUION
+# =============================================================================
+def generar_guion_estructurado(tema: str) -> list:
+    log.info(f"[GROQ] Generando JSON por escenas para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
-    
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "cf-aig-authorization": f"Bearer {CF_AUTH_TOKEN}",
         "Content-Type": "application/json",
-        "User-Agent": "curl/8.0.1" # Evita el bloqueo por WAF
+        "User-Agent": "curl/8.0.1"
     }
     
-    prompt = (
-        f"Genera un guion para un video viral de TikTok sobre: '{tema}'. "
-        "Estructura: GANCHO (1 frase), CUERPO (3 frases cortas), CTA (1 frase). "
-        "El texto total no debe superar las 60 palabras. No uses markdown, ni asteriscos, ni guiones bajos."
-    )
+    prompt = f"""
+    Genera un guion para un video viral de TikTok sobre: '{tema}'.
+    DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura exacta:
+    {{
+      "escenas": [
+        {{"texto": "Frase del gancho (máx 10 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Punto 1 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Punto 2 del cuerpo (máx 12 palabras)", "visual": "english prompt for stock video"}},
+        {{"texto": "Frase del CTA (máx 10 palabras)", "visual": "english prompt for stock video"}}
+      ]
+    }}
+    """
     payload = {
-        "model": GROQ_MODEL, 
-        "messages": [{"role": "user", "content": prompt}], 
-        "max_tokens": 300,
-        "temperature": 0.8
+        "model": "openai/gpt-oss-120b",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"}
     }
-    
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=40)
-        if r.status_code != 200:
-            log.error(f"[GROQ] Error {r.status_code}: {r.text}")
-            return None
-        return r.json()["choices"][0]["message"]["content"].strip()
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+        r.raise_for_status()
+        return json.loads(r.json()["choices"][0]["message"]["content"]).get("escenas", [])
     except Exception as e:
-        log.error(f"[GROQ] Excepción: {e}")
-        return None
+        log.error(f"[GROQ] Error: {e}")
+        return []
 
-# -----------------------------------------------------------------------------
-# 2. GENERAR VOZ (Edge-TTS)
-# -----------------------------------------------------------------------------
-async def generar_voz(texto: str, output_file: str):
-    log.info("[TTS] Generando voz con Edge-TTS...")
+# =============================================================================
+# 2. VOZ Y MEDICIÓN
+# =============================================================================
+async def generar_audio_escena(texto: str, output_file: str):
     try:
-        voice = "es-ES-AlvaroNeural" 
-        communicate = edge_tts.Communicate(texto, voice)
+        communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural")
         await communicate.save(output_file)
-        log.info("[TTS] Voz generada OK.")
+        return True
     except Exception as e:
         log.error(f"[TTS] Error: {e}")
+        return False
 
-# -----------------------------------------------------------------------------
-# 3. BUSCAR VIDEO DE FONDO (Coverr)
-# -----------------------------------------------------------------------------
-def obtener_video_fondo(query: str) -> str:
-    log.info(f"[VIDEO] Buscando fondo para: {query}")
+def obtener_duracion_audio(filepath: str) -> float:
+    try:
+        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filepath]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(result.stdout.strip())
+    except Exception:
+        return 5.0
+
+# =============================================================================
+# 3. DESCARGA DE CLIPS
+# =============================================================================
+def descargar_clip_vertical(query: str, output_file: str):
     try:
         url = f"https://api.coverr.co/videos?query={query}&per_page=1&orientation=portrait"
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            videos = r.json().get("hits", [])
-            if videos:
-                urls = videos[0].get("urls", {})
-                video_url = urls.get("mp4_download") or urls.get("mp4")
+            hits = r.json().get("hits", [])
+            if hits:
+                video_url = hits[0].get("urls", {}).get("mp4_download") or hits[0].get("urls", {}).get("mp4")
                 if video_url:
-                    log.info(f"[VIDEO] Encontrado en Coverr.")
-                    return video_url
-    except Exception as e:
-        log.warning(f"[VIDEO] Coverr falló: {e}")
-    
-    # Plan B: Video de respaldo
-    log.warning("[VIDEO] Usando video de respaldo (Mixkit).")
-    return "https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4"
-
-# -----------------------------------------------------------------------------
-# 4. ENSAMBLAR VIDEO CON FFMPEG
-# -----------------------------------------------------------------------------
-def ensamblar_video(video_url: str, audio_path: str, output_path: str) -> bool:
+                    with open(output_file, "wb") as f:
+                        f.write(requests.get(video_url, timeout=20).content)
+                    return True
+    except Exception:
+        pass
+    # Fallback
     try:
-        log.info("[FFMPEG] Descargando video de fondo...")
-        video_bg = "bg.mp4"
-        with open(video_bg, "wb") as f:
-            f.write(requests.get(video_url, timeout=30).content)
-
-        log.info("[FFMPEG] Ejecutando montaje...")
-        cmd = [
-            "ffmpeg", "-y", "-stream_loop", "-1", "-i", video_bg, "-i", audio_path,
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles=subs.srt:force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3'",
-            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-c:a", "aac", "-shortest", "-t", "20", output_path
-        ]
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        if os.path.exists(video_bg): os.remove(video_bg)
-        log.info("[FFMPEG] Video ensamblado con éxito.")
+        with open(output_file, "wb") as f:
+            f.write(requests.get("https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4", timeout=20).content)
         return True
     except Exception as e:
-        log.error(f"[FFMPEG] Error: {e}")
+        log.error(f"[STOCK] Fallo total: {e}")
         return False
 
-# -----------------------------------------------------------------------------
-# 5. ENDPOINTS
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 4. ENSAMBLAJE Y SUBTÍTULOS
+# =============================================================================
+def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-stream_loop", "-1", "-i", video, "-i", audio,
+            "-t", str(duracion),
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+            "-c:a", "aac", "-shortest", output
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except Exception as e:
+        log.error(f"[FFMPEG] Error escena: {e}")
+        return False
+
+def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str):
+    try:
+        srt_file = os.path.join(WORK_DIR, "subs.srt")
+        current_time = 0.0
+        with open(srt_file, "w", encoding="utf-8") as f:
+            for i, escena in enumerate(escenas):
+                duracion_estimada = max(2.0, len(escena["texto"].split()) / 2.5)
+                start, end = current_time, current_time + duracion_estimada
+                
+                def format_time(sec):
+                    h, m, s = int(sec//3600), int((sec%3600)//60), int(sec%60)
+                    ms = int((sec - int(sec)) * 1000)
+                    return f"{h:02}:{m:02}:{s:02},{ms:03}"
+                
+                f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
+                current_time = end
+
+        concat_file = os.path.join(WORK_DIR, "concat.txt")
+        with open(concat_file, "w") as f:
+            for vid in lista_videos:
+                f.write(f"file '{vid}'\n")
+
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-vf", f"subtitles={srt_file}:force_style='FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3'",
+            "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
+            "-c:a", "aac", output_final
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except Exception as e:
+        log.error(f"[FFMPEG] Error concat: {e}")
+        return False
+
+# =============================================================================
+# 5. ENDPOINT
+# =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus Full Auto v4 (Gateway i-a)"}
+    return {"status": "ONLINE", "engine": "Nexus V3.1"}
 
 @app.post("/generar-tendencias")
-async def generar_todo():
+async def generar_video_completo():
+    if os.path.exists(WORK_DIR):
+        shutil.rmtree(WORK_DIR)
+    os.makedirs(WORK_DIR, exist_ok=True)
+    
     try:
-        tema = "Misterios del océano"
+        tema = "Secretos del universo"
         
-        log.info("=== INICIANDO FLUJO ===")
-        
-        # 1. Guion
-        guion = generar_guion(tema)
-        if not guion: 
-            raise Exception("Fallo en el paso 1 (Groq)")
+        escenas = generar_guion_estructurado(tema)
+        if not escenas:
+            raise Exception("Guion vacío.")
 
-        # 2. Voz
-        audio_path = "voice.mp3"
-        await generar_voz(guion, audio_path)
+        videos_procesados = []
+        for i, escena in enumerate(escenas):
+            log.info(f"[FLOW] Escena {i+1}/{len(escenas)}...")
+            audio_path = os.path.join(WORK_DIR, f"audio_{i}.mp3")
+            video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
+            scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-        # 3. Fondo
-        video_url = obtener_video_fondo("ocean")
-        
-        # 4. Subtítulos
-        with open("subs.srt", "w", encoding="utf-8") as f:
-            f.write(f"1\n00:00:00,000 --> 00:00:20,000\n{guion}\n")
+            await generar_audio_escena(escena["texto"], audio_path)
+            duracion = obtener_duracion_audio(audio_path)
+            
+            if not descargar_clip_vertical(escena["visual"], video_bg):
+                raise Exception(f"Fallo stock escena {i+1}")
 
-        # 5. Ensamblar
-        video_final = "video_final.mp4"
-        exito = ensamblar_video(video_url, audio_path, video_final)
-        if not exito: 
-            raise Exception("Fallo en el paso 5 (FFmpeg)")
+            if not procesar_escena_video(audio_path, video_bg, scene_out, duracion):
+                raise Exception(f"Fallo FFmpeg escena {i+1}")
+            
+            videos_procesados.append(scene_out)
 
-        # 6. Enviar a Telegram
-        log.info("[TELEGRAM] Enviando video final...")
-        telegram_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+        log.info("[FLOW] Concatenando...")
+        video_final = os.path.join(WORK_DIR, "final.mp4")
+        if not concatenar_y_subtitular(videos_procesados, escenas, video_final):
+            raise Exception("Fallo concatenación final.")
+
+        log.info("[FLOW] Enviando a Telegram...")
         with open(video_final, "rb") as video:
-            r = requests.post(
-                telegram_url, 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS FULL AUTO* 🎬\n\n{guion[:120]}..."}, 
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.1* 🎬\n\n{tema}"}, 
                 files={"video": video},
-                timeout=60
+                timeout=120
             )
-            if r.status_code != 200:
-                log.error(f"[TELEGRAM] Error: {r.text}")
-        
-        for f in [audio_path, video_final, "subs.srt"]:
-            if os.path.exists(f): os.remove(f)
 
-        log.info("=== FLUJO COMPLETADO ===")
-        return {"status": "SUCCESS", "message": "Video enviado"}
+        shutil.rmtree(WORK_DIR)
+        return {"status": "SUCCESS", "message": "Video enviado."}
 
     except Exception as e:
-        log.error(f"ERROR CRÍTICO: {e}")
+        log.error(f"[FLOW] ERROR CRÍTICO: {e}")
+        if os.path.exists(WORK_DIR): shutil.rmtree(WORK_DIR)
         return JSONResponse(status_code=500, content={"status": "ERROR", "detail": str(e)})
