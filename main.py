@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 import edge_tts
 import requests
 import subprocess
@@ -8,24 +7,45 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
+# -----------------------------------------------------------------------------
+# CONFIGURACIÓN
+# -----------------------------------------------------------------------------
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nexus")
 
+# Credenciales principales
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 
-GROQ_MODEL = "openai/gpt-oss-120b"
-app = FastAPI(title="Nexus Engine // Full Auto")
+# Cloudflare AI Gateway (Ya configurado con tus datos)
+CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
+CF_GATEWAY_ID = "i-a" 
+CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
+GROQ_MODEL = "openai/gpt-oss-120b"
+app = FastAPI(title="Nexus Engine // Gateway")
+
+# -----------------------------------------------------------------------------
+# 1. GENERAR GUION CON GROQ (Vía Cloudflare)
+# -----------------------------------------------------------------------------
 def generar_guion(tema: str) -> str:
     log.info(f"[GROQ] Iniciando petición para: {tema}")
     if not GROQ_API_KEY:
         log.error("[GROQ] API Key está vacía.")
         return None
         
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    # URL del Gateway de Cloudflare
+    url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "cf-aig-authorization": f"Bearer {CF_AUTH_TOKEN}",
+        "Content-Type": "application/json",
+        "User-Agent": "curl/8.0.1" # Evita el bloqueo por WAF
+    }
+    
     prompt = (
         f"Genera un guion para un video viral de TikTok sobre: '{tema}'. "
         "Estructura: GANCHO (1 frase), CUERPO (3 frases cortas), CTA (1 frase). "
@@ -37,8 +57,9 @@ def generar_guion(tema: str) -> str:
         "max_tokens": 300,
         "temperature": 0.8
     }
+    
     try:
-        r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=40)
+        r = requests.post(url, headers=headers, json=payload, timeout=40)
         if r.status_code != 200:
             log.error(f"[GROQ] Error {r.status_code}: {r.text}")
             return None
@@ -47,6 +68,9 @@ def generar_guion(tema: str) -> str:
         log.error(f"[GROQ] Excepción: {e}")
         return None
 
+# -----------------------------------------------------------------------------
+# 2. GENERAR VOZ (Edge-TTS)
+# -----------------------------------------------------------------------------
 async def generar_voz(texto: str, output_file: str):
     log.info("[TTS] Generando voz con Edge-TTS...")
     try:
@@ -57,9 +81,11 @@ async def generar_voz(texto: str, output_file: str):
     except Exception as e:
         log.error(f"[TTS] Error: {e}")
 
+# -----------------------------------------------------------------------------
+# 3. BUSCAR VIDEO DE FONDO (Coverr)
+# -----------------------------------------------------------------------------
 def obtener_video_fondo(query: str) -> str:
     log.info(f"[VIDEO] Buscando fondo para: {query}")
-    # Intentamos con Coverr
     try:
         url = f"https://api.coverr.co/videos?query={query}&per_page=1&orientation=portrait"
         r = requests.get(url, timeout=10)
@@ -74,10 +100,13 @@ def obtener_video_fondo(query: str) -> str:
     except Exception as e:
         log.warning(f"[VIDEO] Coverr falló: {e}")
     
-    # Si falla, usamos Mixkit (Video de respaldo de alta calidad)
+    # Plan B: Video de respaldo
     log.warning("[VIDEO] Usando video de respaldo (Mixkit).")
     return "https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4"
 
+# -----------------------------------------------------------------------------
+# 4. ENSAMBLAR VIDEO CON FFMPEG
+# -----------------------------------------------------------------------------
 def ensamblar_video(video_url: str, audio_path: str, output_path: str) -> bool:
     try:
         log.info("[FFMPEG] Descargando video de fondo...")
@@ -101,9 +130,12 @@ def ensamblar_video(video_url: str, audio_path: str, output_path: str) -> bool:
         log.error(f"[FFMPEG] Error: {e}")
         return False
 
+# -----------------------------------------------------------------------------
+# 5. ENDPOINTS
+# -----------------------------------------------------------------------------
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus Full Auto v3"}
+    return {"status": "ONLINE", "engine": "Nexus Full Auto v4 (Gateway i-a)"}
 
 @app.post("/generar-tendencias")
 async def generar_todo():
