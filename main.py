@@ -5,6 +5,7 @@ import edge_tts
 import requests
 import subprocess
 import shutil
+import asyncio
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -25,7 +26,7 @@ CF_GATEWAY_ID = "i-a"
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
 WORK_DIR = "/tmp/nexus_work"
-app = FastAPI(title="Nexus V3.2 Engine // Fire & Forget")
+app = FastAPI(title="Nexus V3.3 Engine // Ultra-Resilient")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -67,16 +68,32 @@ def generar_guion_estructurado(tema: str) -> list:
         return []
 
 # =============================================================================
-# 2. VOZ Y MEDICIÓN
+# 2. VOZ Y MEDICIÓN (CON RESPALDO DE EMERGENCIA)
 # =============================================================================
 async def generar_audio_escena(texto: str, output_file: str):
+    log.info(f"[TTS] Generando audio para: {texto[:30]}...")
     try:
         communicate = edge_tts.Communicate(texto, "es-ES-AlvaroNeural")
         await communicate.save(output_file)
+        
+        # Verificación crítica: si el archivo no existe o está vacío, forzamos error
+        if not os.path.exists(output_file) or os.path.getsize(output_file) < 1000:
+            raise Exception("El archivo de audio está vacío o corrupto.")
+            
         return True
     except Exception as e:
-        log.error(f"[TTS] Error: {e}")
-        return False
+        log.error(f"[TTS] Fallo Edge-TTS: {e}. Generando audio de respaldo.")
+        # Plan B: Generar un tono de silencio de 3 segundos
+        try:
+            cmd_fallback = [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", "3", "-q:a", "9", "-acodec", "libmp3lame", output_file
+            ]
+            subprocess.run(cmd_fallback, check=True, capture_output=True)
+            return True
+        except Exception as fallback_error:
+            log.error(f"[TTS] Incluso el respaldo falló: {fallback_error}")
+            return False
 
 def obtener_duracion_audio(filepath: str) -> float:
     try:
@@ -84,7 +101,7 @@ def obtener_duracion_audio(filepath: str) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return float(result.stdout.strip())
     except Exception:
-        return 5.0
+        return 3.0
 
 # =============================================================================
 # 3. DESCARGA DE CLIPS
@@ -113,12 +130,17 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. ENSAMBLAJE Y SUBTÍTULOS
+# 4. ENSAMBLAJE Y SUBTÍTULOS (FFMPEG BLINDADO)
 # =============================================================================
 def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
     try:
+        # Añadimos -err_detect ignore_err para que FFmpeg no colapse si el audio tiene fallos leves
         cmd = [
-            "ffmpeg", "-y", "-stream_loop", "-1", "-i", video, "-i", audio,
+            "ffmpeg", "-y", 
+            "-err_detect", "ignore_err", 
+            "-fflags", "+discardcorrupt",
+            "-stream_loop", "-1", "-i", video, 
+            "-i", audio,
             "-t", str(duracion),
             "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
@@ -126,8 +148,8 @@ def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
-    except Exception as e:
-        log.error(f"[FFMPEG] Error escena: {e}")
+    except subprocess.CalledProcessError as e:
+        log.error(f"[FFMPEG] Error escena: {e.stderr.decode()[:300]}")
         return False
 
 def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str):
@@ -181,7 +203,7 @@ def procesar_video_en_segundo_plano(tema: str):
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            import asyncio
+            # Ejecutamos la corrutina de audio de forma segura
             asyncio.run(generar_audio_escena(escena["texto"], audio_path))
             duracion = obtener_duracion_audio(audio_path)
             
@@ -209,7 +231,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.2* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V3.3* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -225,7 +247,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V3.2"}
+    return {"status": "ONLINE", "engine": "Nexus V3.3"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
@@ -235,8 +257,7 @@ async def generar_video_completo(background_tasks: BackgroundTasks):
     
     tema = "Secretos del universo"
     
-    # Magia: Le decimos a FastAPI que haga el trabajo PESADO en segundo plano
+    # Enviamos el trabajo a segundo plano y respondemos a Cron-job al instante
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
-    # Respondemos a Cron-job.org INMEDIATAMENTE
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
