@@ -21,13 +21,13 @@ log = logging.getLogger("nexus")
 GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
 TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
 TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-PEXELS_API_KEY = (os.getenv("PEXELS_API_KEY") or "").strip() # NUEVA VARIABLE
+PIXABAY_API_KEY = (os.getenv("PIXABAY_API_KEY") or "").strip() # NUEVA VARIABLE
 
 CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V12.0 // Real Stock Video")
+app = FastAPI(title="Nexus V13.0 // Pixabay Engine")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -103,37 +103,42 @@ def obtener_duracion_audio(filepath: str) -> float:
         return 3.0
 
 # =============================================================================
-# 3. DESCARGA DE CLIPS (PEXELS + FALLBACK LOCAL)
+# 3. DESCARGA DE CLIPS (PIXABAY + FALLBACK LOCAL)
 # =============================================================================
 def descargar_clip_vertical(query: str, output_file: str, duracion: float):
-    # Intentar con Pexels
-    if PEXELS_API_KEY:
+    # 1. Intentar con Pixabay
+    if PIXABAY_API_KEY:
         try:
-            url = f"https://api.pexels.com/videos/search?query={query}&per_page=1&orientation=portrait&size=medium"
-            headers = {"Authorization": PEXELS_API_KEY}
-            r = requests.get(url, headers=headers, timeout=15)
+            url = "https://pixabay.com/api/videos/"
+            params = {
+                "key": PIXABAY_API_KEY,
+                "q": query,
+                "per_page": 3,
+                "orientation": "vertical",
+                "video_type": "film"
+            }
+            r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
-                videos = r.json().get("videos", [])
-                if videos:
-                    # Buscar el archivo de video más pequeño que cubra el tiempo
-                    video_files = videos[0].get("video_files", [])
-                    # Ordenar por calidad (preferimos HD 720p)
-                    video_files.sort(key=lambda x: x.get("width", 9999))
-                    for vf in video_files:
-                        if vf.get("link"):
-                            log.info(f"[STOCK] Descargando de Pexels: {vf.get('width')}x{vf.get('height')}")
-                            with open(output_file, "wb") as f:
-                                f.write(requests.get(vf["link"], timeout=30).content)
-                            
-                            # Validar que el video descargado sirve
-                            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
-                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-                            if res.returncode == 0:
-                                return True
+                hits = r.json().get("hits", [])
+                if hits:
+                    # Buscar la mejor resolución (medium es ideal para Render)
+                    videos = hits[0].get("videos", {})
+                    video_url = videos.get("medium", {}).get("url") or videos.get("small", {}).get("url")
+                    
+                    if video_url:
+                        log.info(f"[STOCK] Descargando de Pixabay...")
+                        with open(output_file, "wb") as f:
+                            f.write(requests.get(video_url, timeout=30).content)
+                        
+                        # Validar que el video descargado sirve
+                        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
+                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                        if res.returncode == 0:
+                            return True
         except Exception as e:
-            log.warning(f"[STOCK] Pexels falló: {e}")
+            log.warning(f"[STOCK] Pixabay falló: {e}")
 
-    # FALLBACK: Generar fondo local si Pexels falla
+    # 2. FALLBACK: Generar fondo local si Pixabay falla
     log.warning("[STOCK] Generando fondo local de respaldo...")
     try:
         cmd = [
@@ -229,7 +234,7 @@ def procesar_video_en_segundo_plano(tema: str):
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
-            # Descargar de Pexels o generar fondo local
+            # Descargar de Pixabay o generar fondo local
             if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg, duracion):
                 log.error(f"[BG] Fallo stock escena {i+1}")
                 continue
@@ -254,7 +259,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V12.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V13.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -271,7 +276,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V12.0"}
+    return {"status": "ONLINE", "engine": "Nexus V13.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
