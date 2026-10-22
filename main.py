@@ -72,16 +72,13 @@ def generar_guion_estructurado(tema: str) -> list:
 def generar_audio_escena(texto: str, output_file: str) -> bool:
     log.info(f"[TTS] Generando audio para: {texto[:30]}...")
     try:
-        # gTTS es síncrono, se ejecuta directamente sin await
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(output_file)
         
-        # Validación rápida con ffprobe
         cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", output_file]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0 or float(result.stdout.strip()) <= 0:
             raise Exception("Audio inválido generado por gTTS")
-            
         return True
     except Exception as e:
         log.error(f"[TTS] Error: {e}. Generando silencio de respaldo.")
@@ -121,7 +118,6 @@ def descargar_clip_vertical(query: str, output_file: str):
                     return True
     except Exception:
         pass
-    # Fallback
     try:
         with open(output_file, "wb") as f:
             f.write(requests.get("https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1610-large.mp4", timeout=20).content)
@@ -185,7 +181,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         return False
 
 # =============================================================================
-# 5. LÓGICA DE FONDO (SÍNCRONA, SIN AWAIT)
+# 5. LÓGICA DE FONDO (SÍNCRONA)
 # =============================================================================
 def procesar_video_en_segundo_plano(tema: str):
     try:
@@ -202,7 +198,6 @@ def procesar_video_en_segundo_plano(tema: str):
             video_bg = os.path.join(WORK_DIR, f"bg_{i}.mp4")
             scene_out = os.path.join(WORK_DIR, f"scene_{i}.mp4")
 
-            # Llamada directa a la función síncrona de gTTS
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
             
@@ -255,8 +250,6 @@ async def generar_video_completo(background_tasks: BackgroundTasks):
     os.makedirs(WORK_DIR, exist_ok=True)
     
     tema = "Secretos del universo"
-    
-    # Se añade la tarea síncrona directamente
     background_tasks.add_task(procesar_video_en_segundo_plano, tema)
     
     return {"status": "ACCEPTED", "message": "Video en proceso. Revisa Telegram en 1 minuto."}
