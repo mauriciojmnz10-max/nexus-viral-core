@@ -27,7 +27,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V16.0 // Normalized Concat")
+app = FastAPI(title="Nexus V17.0 // Master Audio")
 
 # =============================================================================
 # 1. GENERACIÓN DE GUION
@@ -147,33 +147,43 @@ def descargar_clip_vertical(query: str, output_file: str):
         return False
 
 # =============================================================================
-# 4. NORMALIZACIÓN DE ESCENA (LA CLAVE)
+# 4. ENSAMBLAJE DE VIDEO MUDO Y AUDIO MAESTRO
 # =============================================================================
-def procesar_escena_video(audio: str, video: str, output: str, duracion: float):
+def procesar_escena_video_mudo(video: str, output: str, duracion: float):
     try:
         if os.path.exists(output): os.remove(output)
-        
-        # Forzamos TODAS las propiedades: 1080x1920, 30fps, sample rate 44100, estéreo
         cmd = [
             "ffmpeg", "-y",
             "-i", video,
-            "-i", audio,
             "-t", str(duracion),
             "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-c:a", "aac", "-ar", "44100", "-ac", "2",
-            "-shortest", output
+            "-an", # SIN AUDIO
+            output
         ]
         subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
-        log.error(f"[FFMPEG] Error escena: {e.stderr.decode()[:300]}")
+        log.error(f"[FFMPEG] Error escena muda: {e.stderr.decode()[:300]}")
+        return False
+
+def unir_audios(audios: list, output_wav: str) -> bool:
+    try:
+        log.info("[AUDIO] Uniendo pistas de audio con pydub...")
+        combined = AudioSegment.empty()
+        for audio_file in audios:
+            segment = AudioSegment.from_file(audio_file, format="wav")
+            combined += segment
+        combined.export(output_wav, format="wav")
+        return True
+    except Exception as e:
+        log.error(f"[AUDIO] Error uniendo pistas: {e}")
         return False
 
 # =============================================================================
-# 5. CONCATENACIÓN CON DEMUXER (MÁS ESTABLE)
+# 5. CONCATENACIÓN FINAL Y SUBTÍTULOS
 # =============================================================================
-def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str, work_dir: str):
+def concatenar_y_subtitular(lista_videos: list, escenas: list, audio_maestro: str, output_final: str, work_dir: str):
     try:
         # Generar SRT
         srt_file = os.path.join(work_dir, "subs.srt")
@@ -192,7 +202,7 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
                 f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{escena['texto']}\n\n")
                 current_time = end
 
-        # Crear archivo de concat con comillas simples (evita errores de ruta)
+        # Crear archivo de concat
         concat_file = os.path.join(work_dir, "concat.txt")
         with open(concat_file, "w") as f:
             for vid in lista_videos:
@@ -202,18 +212,28 @@ def concatenar_y_subtitular(lista_videos: list, escenas: list, output_final: str
         
         style = "FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=10,MarginV=400"
         
-        # Usamos DEMUXER (f concat) con -c copy, pero como ya normalizamos todo, no debería fallar
-        cmd = [
+        # 1. Concatenamos los videos mudos
+        video_mudo_temp = os.path.join(work_dir, "video_mudo.mp4")
+        cmd_concat = [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", concat_file,
+            "-c", "copy", video_mudo_temp
+        ]
+        subprocess.run(cmd_concat, check=True, capture_output=True)
+
+        # 2. Inyectamos el audio maestro y los subtítulos
+        cmd_final = [
+            "ffmpeg", "-y",
+            "-i", video_mudo_temp,
+            "-i", audio_maestro,
             "-vf", f"subtitles={srt_file}:force_style='{style}'",
             "-c:v", "libx264", "-preset", "ultrafast", "-threads", "1",
-            "-c:a", "aac", output_final
+            "-c:a", "aac", "-shortest", output_final
         ]
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd_final, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
-        log.error(f"[FFMPEG] Error concat: {e.stderr.decode()[:500]}")
+        log.error(f"[FFMPEG] Error concat final: {e.stderr.decode()[:500]}")
         return False
 
 # =============================================================================
@@ -231,6 +251,8 @@ def procesar_video_en_segundo_plano(tema: str):
             return
 
         videos_procesados = []
+        audios_procesados = []
+
         for i, escena in enumerate(escenas):
             log.info(f"[BG] Escena {i+1}/{len(escenas)}...")
             
@@ -240,12 +262,14 @@ def procesar_video_en_segundo_plano(tema: str):
 
             generar_audio_escena(escena["texto"], audio_path)
             duracion = obtener_duracion_audio(audio_path)
+            audios_procesados.append(audio_path)
             
             if not descargar_clip_vertical(escena.get("visual", "abstract"), video_bg):
                 log.error(f"[BG] Fallo stock escena {i+1}")
                 continue
 
-            if not procesar_escena_video(audio_path, video_bg, scene_out, duracion):
+            # Procesamos el video SIN audio
+            if not procesar_escena_video_mudo(video_bg, scene_out, duracion):
                 log.error(f"[BG] Fallo FFmpeg escena {i+1}")
                 continue
             
@@ -255,9 +279,15 @@ def procesar_video_en_segundo_plano(tema: str):
             log.error("[BG] No se procesó ningún video.")
             return
 
-        log.info("[BG] Concatenando...")
+        log.info("[BG] Uniendo audio maestro...")
+        audio_maestro = os.path.join(work_dir, "audio_maestro.wav")
+        if not unir_audios(audios_procesados, audio_maestro):
+            log.error("[BG] Fallo al unir audios.")
+            return
+
+        log.info("[BG] Concatenando y subtitulando...")
         video_final = os.path.join(work_dir, "final.mp4")
-        if not concatenar_y_subtitular(videos_procesados, escenas, video_final, work_dir):
+        if not concatenar_y_subtitular(videos_procesados, escenas, audio_maestro, video_final, work_dir):
             log.error("[BG] Fallo concatenación final.")
             return
 
@@ -265,7 +295,7 @@ def procesar_video_en_segundo_plano(tema: str):
         with open(video_final, "rb") as video:
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", 
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V16.0* 🎬\n\n{tema}"}, 
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": f"🎬 *NEXUS V17.0* 🎬\n\n{tema}"}, 
                 files={"video": video},
                 timeout=120
             )
@@ -282,7 +312,7 @@ def procesar_video_en_segundo_plano(tema: str):
 # =============================================================================
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V16.0"}
+    return {"status": "ONLINE", "engine": "Nexus V17.0"}
 
 @app.post("/generar-tendencias")
 async def generar_video_completo(background_tasks: BackgroundTasks):
