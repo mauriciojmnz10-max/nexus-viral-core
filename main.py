@@ -22,26 +22,34 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V49.0 // High CPM")
+app = FastAPI(title="Nexus V51.0 // Rotation & Hybrid")
 
-# LISTA DE NICHO DE ALTO CPM Y FÁCILES DE ILUSTRAR
-NICHOS_ALTO_VALOR = [
-    "Finanzas personales e inversión",
-    "Tecnología y gadgets",
-    "Inteligencia Artificial y software",
-    "Educación financiera",
-    "Seguros y protección de patrimonio",
-    "Derecho y legal básico",
-    "Ciencia y descubrimientos",
-    "Productividad y hábitos"
-]
+# --- SISTEMA DE ROTACIÓN DE CONTENIDO ---
+TEMAS_FINANZAS = ["El error de las tarjetas de crédito", "Cómo ahorrar sin darte cuenta", "La trampa de los préstamos rápidos"]
+TEMAS_TECNOLOGIA = ["La IA que te quitará el trabajo", "El gadget que ahorra energía", "Cómo proteger tu privacidad en internet"]
+TEMAS_MISTERIO = ["El secreto de la Gran Pirámide", "Las coordenadas del Triángulo de las Bermudas", "El código oculto en la Mona Lisa"]
+QUIZ_CULTURA = ["Quiz: ¿Cuánto sabes de historia universal?", "Quiz: Adivina el país por su bandera", "Quiz: Preguntas de ciencia básica"]
+
+def obtener_tema_aleatorio():
+    categorias = ["finanzas", "tecnologia", "misterio", "quiz"]
+    categoria = random.choice(categorias)
+    
+    if categoria == "finanzas":
+        return random.choice(TEMAS_FINANZAS), "finanzas", "normal"
+    elif categoria == "tecnologia":
+        return random.choice(TEMAS_TECNOLOGIA), "tecnologia", "normal"
+    elif categoria == "misterio":
+        return random.choice(TEMAS_MISTERIO), "misterio", "normal"
+    else:
+        return random.choice(QUIZ_CULTURA), "cultura general", "quiz"
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "auto"
+    modo: str = "normal"
 
-def generar_guion(tema: str, nicho: str):
-    log.info(f"[GROQ] Generando guion para: {tema} (Nicho: {nicho})")
+def generar_guion(tema: str, nicho: str, modo: str):
+    log.info(f"[GROQ] Generando guion para: {tema} (Modo: {modo})")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     
     headers = {
@@ -51,55 +59,55 @@ def generar_guion(tema: str, nicho: str):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    prompt = f"""
-    Actúa como un Educador y Experto en {nicho} para YouTube Shorts.
-    Genera un guion de 12 escenas sobre: '{tema}'.
-    
-    ESTRUCTURA NARRATIVA (ALTO VALOR Y RETENCIÓN):
-    1. GANCHO (Escena 1): Plantea un error común, una pérdida de dinero o un dato impactante. (Ej: "El 90% de la gente comete este error con su tarjeta de crédito...").
-    2. DESARROLLO (Escenas 2-10): Explicación paso a paso, revelación de secretos de la industria o datos técnicos. Frases cortas, usa comas.
-    3. CIERRE (Escenas 11-12): Recomendación práctica y llamado a la acción (ej: "Guarda este video para no olvidarlo").
-    
-    REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe EXACTAMENTE 2 o 3 palabras clave en INGLÉS que representen el objeto FÍSICO exacto de la escena.
-    Ejemplo: Si habla de dinero, pon "money cash". Si habla de tecnología, pon "laptop technology". Si habla de invertir, pon "stock market graph".
-    NO uses conceptos abstractos.
+    if modo == "quiz":
+        prompt = f"""
+        Actúa como un creador de contenido de entretenimiento para YouTube Shorts.
+        Genera un guion tipo QUIZ de 12 escenas sobre: '{tema}'.
+        
+        ESTRUCTURA:
+        1. GANCHO: "Solo el 1% puede responder esto..."
+        2. Pregunta 1 (Escena 2) y Respuesta 1 (Escena 3).
+        3. Pregunta 2 (Escena 4) y Respuesta 2 (Escena 5).
+        4. Pregunta 3 (Escena 6) y Respuesta 3 (Escena 7).
+        5. Cierre: "¿Cuántas acertaste? Comenta tu puntuación".
+        
+        REGLAS VISUALES:
+        Para el campo "visual", escribe 2 palabras clave en INGLÉS relacionadas con el tema o con "question mark", "brain".
+        """
+    else:
+        prompt = f"""
+        Actúa como un Educador y Experto en {nicho} para YouTube Shorts.
+        Genera un guion de 12 escenas sobre: '{tema}'.
+        
+        ESTRUCTURA NARRATIVA:
+        1. GANCHO: Plantea un error, pérdida o dato impactante.
+        2. DESARROLLO: Explicación paso a paso.
+        3. CIERRE: Recomendación y CTA.
+        
+        REGLAS VISUALES:
+        Escribe 2 palabras clave en INGLÉS del objeto físico. (Ej: "money cash", "laptop technology").
+        """
 
-    METADATOS:
-    - Plataforma: "YouTube".
-    - Título adictivo (máx 50 caracteres).
-    - Descripción persuasiva.
-    - 5 hashtags virales.
-    - CTA final.
-
+    prompt += """
+    METADATOS: Título adictivo, descripción, 5 hashtags, CTA.
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura:
-    {{
+    {
       "plataforma": "YouTube",
       "titulo": "Título adictivo",
-      "descripcion": "Descripción persuasiva.",
+      "descripcion": "Descripción.",
       "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5",
-      "cta_link": "Link o frase final",
+      "cta_link": "CTA",
       "escenas": [
-        {{"texto": "Gancho de error real", "visual": "money cash"}},
-        {{"texto": "Consecuencia 1", "visual": "credit card"}},
-        {{"texto": "Dato técnico 1", "visual": "stock market graph"}},
-        {{"texto": "Consecuencia 2", "visual": "laptop technology"}},
-        {{"texto": "Dato técnico 2", "visual": "bank building"}},
-        {{"texto": "Consecuencia 3", "visual": "calculator math"}},
-        {{"texto": "Dato técnico 3", "visual": "smartphone app"}},
-        {{"texto": "Consecuencia 4", "visual": "person working"}},
-        {{"texto": "Dato técnico 4", "visual": "graph finance"}},
-        {{"texto": "Revelación final", "visual": "business meeting"}},
-        {{"texto": "Pregunta de debate", "visual": "question mark"}},
-        {{"texto": "CTA y suscripción", "visual": "subscribe button"}}
+        {"texto": "Texto de la escena", "visual": "keyword"}
       ]
-    }}
+    }
+    (Asegúrate de generar 12 escenas)
     """
     
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.6,
+        "temperature": 0.7,
         "response_format": {"type": "json_object"}
     }
     
@@ -127,13 +135,8 @@ def disparar_github(escenas, metadata):
         return r.status_code == 204
     except: return False
 
-def procesar_video_en_segundo_plano(tema: str, nicho: str):
-    # Si el nicho es "auto", selecciona uno al azar de la lista de alto CPM
-    if nicho == "auto":
-        nicho = random.choice(NICHOS_ALTO_VALOR)
-        log.info(f"[AUTO] Nicho seleccionado: {nicho}")
-
-    data = generar_guion(tema, nicho)
+def procesar_video_en_segundo_plano(tema: str, nicho: str, modo: str = "normal"):
+    data = generar_guion(tema, nicho, modo)
     if not data: return
     escenas = data.get("escenas", [])
     metadata = {
@@ -142,23 +145,23 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         "descripcion": data.get("descripcion", ""),
         "hashtags": data.get("hashtags", ""),
         "cta_link": data.get("cta_link", ""),
-        "nicho_usado": nicho # Guardamos el nicho para mostrarlo en Telegram
+        "nicho_usado": f"{nicho} ({modo})"
     }
     if disparar_github(escenas, metadata):
-        msg = f"🚀 *NEXUS HÍBRIDO* 🚀\n\nSe ha enviado el guion a GitHub Actions.\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}\n\n*El video llegará a este chat en unos minutos.*"
+        msg = f"🚀 *NEXUS HÍBRIDO* 🚀\n\nSe ha enviado el guion a GitHub Actions.\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho} ({modo})\n\n*El video llegará a este chat en unos minutos.*"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V49.0"}
+    return {"status": "ONLINE", "engine": "Nexus V51.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
-    # Tema por defecto para el Cron
-    background_tasks.add_task(procesar_video_en_segundo_plano, "El error financiero que te hace perder dinero", "auto")
-    return {"status": "ACCEPTED"}
+    tema, nicho, modo = obtener_tema_aleatorio()
+    background_tasks.add_task(procesar_video_en_segundo_plano, tema, nicho, modo)
+    return {"status": "ACCEPTED", "tema": tema}
 
 @app.post("/generar-video")
 async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(procesar_video_en_segundo_plano, request.tema, request.nicho)
+    background_tasks.add_task(procesar_video_en_segundo_plano, request.tema, request.nicho, request.modo)
     return {"status": "ACCEPTED"}
