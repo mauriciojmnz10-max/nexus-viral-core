@@ -21,7 +21,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V40.0 // Stable Brain")
+app = FastAPI(title="Nexus V41.0 // Stable Brain")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -139,7 +139,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V40.0"}
+    return {"status": "ONLINE", "engine": "Nexus V41.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
