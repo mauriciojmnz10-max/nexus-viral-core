@@ -13,6 +13,10 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
+# Música y SFX (URLs directas de Mixkit/Pixabay)
+MUSIC_MISTERIO = "https://assets.mixkit.co/music/preview/mixkit-mysterious-dark-and-mysterious-ambient-1005.mp3"
+MUSIC_FINANZAS = "https://assets.mixkit.co/music/preview/mixkit-modern-logo-3-1191.mp3"
+MUSIC_QUIZ = "https://assets.mixkit.co/music/preview/mixkit-game-level-3-2076.mp3"
 SFX_CLOCK = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"
 
 def enviar_mensaje_telegram(texto):
@@ -35,9 +39,9 @@ def descargar_fondo_base(output_path):
     except: pass
     return False
 
-def descargar_sfx(url, output):
+def descargar_audio(url, output):
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=15)
         if r.status_code == 200:
             with open(output, "wb") as f:
                 f.write(r.content)
@@ -100,13 +104,23 @@ def main():
 
     scenes = json.loads(os.getenv("SCENES_JSON"))
     metadata = json.loads(os.getenv("METADATA_JSON"))
+    nicho = metadata.get("nicho_usado", "").lower()
 
     try:
         fondo_base_path = os.path.join(work_dir, "fondo_base.mp4")
         tiene_fondo_base = descargar_fondo_base(fondo_base_path)
         
         reloj_path = os.path.join(work_dir, "reloj.mp3")
-        tiene_reloj = descargar_sfx(SFX_CLOCK, reloj_path)
+        tiene_reloj = descargar_audio(SFX_CLOCK, reloj_path)
+
+        # --- SELECCIÓN DE MÚSICA SEGÚN NICHO ---
+        music_path = os.path.join(work_dir, "music.mp3")
+        if "quiz" in nicho:
+            descargar_audio(MUSIC_QUIZ, music_path)
+        elif "finanzas" in nicho or "tecnologia" in nicho or "legal" in nicho:
+            descargar_audio(MUSIC_FINANZAS, music_path)
+        else:
+            descargar_audio(MUSIC_MISTERIO, music_path)
 
         audios = []
         duraciones = []
@@ -128,15 +142,29 @@ def main():
 
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
-        audio_maestro = os.path.join(work_dir, "audio_maestro.mp3")
-        combined.export(audio_maestro, format="mp3")
+        
+        # --- MEZCLAR VOZ CON MÚSICA DE FONDO ---
+        audio_final = os.path.join(work_dir, "audio_maestro.mp3")
+        if os.path.exists(music_path):
+            voz_seg = combined
+            musica_seg = AudioSegment.from_file(music_path, format="mp3")
+            # Repetir música hasta que cubra la duración de la voz
+            if len(musica_seg) < len(voz_seg):
+                repeticiones = (len(voz_seg) // len(musica_seg)) + 1
+                musica_seg = musica_seg * repeticiones
+            musica_seg = musica_seg[:len(voz_seg)]
+            # Bajar volumen de la música al 12%
+            musica_seg = musica_seg - 18 
+            mezcla = voz_seg.overlay(musica_seg)
+            mezcla.export(audio_final, format="mp3")
+        else:
+            combined.export(audio_final, format="mp3")
 
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             dur = duraciones[i]
             query = scene["visual"]
-            print(f"[ESCENA {i+1}] Buscando: {query}")
             
             path = buscar_pixabay(query, work_dir, es_video=False)
             if path:
@@ -151,7 +179,6 @@ def main():
                 continue
 
             if tiene_fondo_base:
-                print(f"  -> Usando FONDO BASE para escena {i+1}")
                 shutil.copy(fondo_base_path, final_bg)
                 clips.append(final_bg)
             else:
@@ -193,11 +220,11 @@ def main():
         filter_str += f"[v]subtitles={srt_path}:force_style='{style}'[vout]"
 
         final_path = os.path.join(work_dir, "final.mp4")
-        cmd = ["ffmpeg", "-y", *inputs, "-i", audio_maestro, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
+        cmd = ["ffmpeg", "-y", *inputs, "-i", audio_final, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
         nicho_usado = metadata.get("nicho_usado", "No especificado")
-        caption = f"🎬 *NEXUS RENDER (Quiz Master Pro)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
+        caption = f"🎬 *NEXUS RENDER (Cinematic Shield)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
