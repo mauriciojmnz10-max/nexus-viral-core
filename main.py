@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import requests
+import random
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -21,14 +22,26 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V48.0 // Hybrid Visual")
+app = FastAPI(title="Nexus V49.0 // High CPM")
+
+# LISTA DE NICHO DE ALTO CPM Y FÁCILES DE ILUSTRAR
+NICHOS_ALTO_VALOR = [
+    "Finanzas personales e inversión",
+    "Tecnología y gadgets",
+    "Inteligencia Artificial y software",
+    "Educación financiera",
+    "Seguros y protección de patrimonio",
+    "Derecho y legal básico",
+    "Ciencia y descubrimientos",
+    "Productividad y hábitos"
+]
 
 class VideoRequest(BaseModel):
     tema: str
-    nicho: str = "datos curiosos"
+    nicho: str = "auto"
 
 def generar_guion(tema: str, nicho: str):
-    log.info(f"[GROQ] Generando guion para: {tema}")
+    log.info(f"[GROQ] Generando guion para: {tema} (Nicho: {nicho})")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     
     headers = {
@@ -39,17 +52,17 @@ def generar_guion(tema: str, nicho: str):
     }
     
     prompt = f"""
-    Actúa como un Guionista Viral Senior de TikTok.
+    Actúa como un Educador y Experto en {nicho} para YouTube Shorts.
     Genera un guion de 12 escenas sobre: '{tema}'.
     
-    ESTRUCTURA NARRATIVA:
-    1. GANCHO: Paradoja o desafío lógico.
-    2. DESARROLLO: Revelación progresiva. Dato técnico + Consecuencia asombrosa.
-    3. CIERRE: Debate y suscripción.
+    ESTRUCTURA NARRATIVA (ALTO VALOR Y RETENCIÓN):
+    1. GANCHO (Escena 1): Plantea un error común, una pérdida de dinero o un dato impactante. (Ej: "El 90% de la gente comete este error con su tarjeta de crédito...").
+    2. DESARROLLO (Escenas 2-10): Explicación paso a paso, revelación de secretos de la industria o datos técnicos. Frases cortas, usa comas.
+    3. CIERRE (Escenas 11-12): Recomendación práctica y llamado a la acción (ej: "Guarda este video para no olvidarlo").
     
     REGLAS VISUALES (CRÍTICO):
     Para el campo "visual", escribe EXACTAMENTE 2 o 3 palabras clave en INGLÉS que representen el objeto FÍSICO exacto de la escena.
-    Si habla de la Gran Pirámide, pon "Great Pyramid of Giza". Si habla de constelaciones, pon "Orion constellation".
+    Ejemplo: Si habla de dinero, pon "money cash". Si habla de tecnología, pon "laptop technology". Si habla de invertir, pon "stock market graph".
     NO uses conceptos abstractos.
 
     METADATOS:
@@ -67,18 +80,18 @@ def generar_guion(tema: str, nicho: str):
       "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5",
       "cta_link": "Link o frase final",
       "escenas": [
-        {{"texto": "Gancho de paradoja real", "visual": "Great Pyramid of Giza"}},
-        {{"texto": "Dato técnico 1", "visual": "compass math"}},
-        {{"texto": "Consecuencia asombrosa 1", "visual": "stone blocks"}},
-        {{"texto": "Dato técnico 2", "visual": "Orion constellation"}},
-        {{"texto": "Consecuencia asombrosa 2", "visual": "world map coordinates"}},
-        {{"texto": "Dato técnico 3", "visual": "sun light"}},
-        {{"texto": "Consecuencia asombrosa 3", "visual": "satellite space"}},
-        {{"texto": "Dato técnico 4", "visual": "ancient scroll"}},
-        {{"texto": "Consecuencia asombrosa 4", "visual": "desert sand"}},
-        {{"texto": "Revelación final", "visual": "Great Sphinx of Giza"}},
-        {{"texto": "Pregunta de debate", "visual": "microscope science"}},
-        {{"texto": "CTA y suscripción", "visual": "camera lens"}}
+        {{"texto": "Gancho de error real", "visual": "money cash"}},
+        {{"texto": "Consecuencia 1", "visual": "credit card"}},
+        {{"texto": "Dato técnico 1", "visual": "stock market graph"}},
+        {{"texto": "Consecuencia 2", "visual": "laptop technology"}},
+        {{"texto": "Dato técnico 2", "visual": "bank building"}},
+        {{"texto": "Consecuencia 3", "visual": "calculator math"}},
+        {{"texto": "Dato técnico 3", "visual": "smartphone app"}},
+        {{"texto": "Consecuencia 4", "visual": "person working"}},
+        {{"texto": "Dato técnico 4", "visual": "graph finance"}},
+        {{"texto": "Revelación final", "visual": "business meeting"}},
+        {{"texto": "Pregunta de debate", "visual": "question mark"}},
+        {{"texto": "CTA y suscripción", "visual": "subscribe button"}}
       ]
     }}
     """
@@ -115,6 +128,11 @@ def disparar_github(escenas, metadata):
     except: return False
 
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
+    # Si el nicho es "auto", selecciona uno al azar de la lista de alto CPM
+    if nicho == "auto":
+        nicho = random.choice(NICHOS_ALTO_VALOR)
+        log.info(f"[AUTO] Nicho seleccionado: {nicho}")
+
     data = generar_guion(tema, nicho)
     if not data: return
     escenas = data.get("escenas", [])
@@ -123,19 +141,21 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
         "titulo": data.get("titulo", "Video"),
         "descripcion": data.get("descripcion", ""),
         "hashtags": data.get("hashtags", ""),
-        "cta_link": data.get("cta_link", "")
+        "cta_link": data.get("cta_link", ""),
+        "nicho_usado": nicho # Guardamos el nicho para mostrarlo en Telegram
     }
     if disparar_github(escenas, metadata):
-        msg = f"🚀 *NEXUS HÍBRIDO* 🚀\n\nSe ha enviado el guion a GitHub Actions.\n\n📌 *Título:* {metadata['titulo']}\n\n*El video llegará a este chat en unos minutos.*"
+        msg = f"🚀 *NEXUS HÍBRIDO* 🚀\n\nSe ha enviado el guion a GitHub Actions.\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}\n\n*El video llegará a este chat en unos minutos.*"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V48.0"}
+    return {"status": "ONLINE", "engine": "Nexus V49.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
-    background_tasks.add_task(procesar_video_en_segundo_plano, "Los secretos matemáticos de la Gran Pirámide", "datos curiosos")
+    # Tema por defecto para el Cron
+    background_tasks.add_task(procesar_video_en_segundo_plano, "El error financiero que te hace perder dinero", "auto")
     return {"status": "ACCEPTED"}
 
 @app.post("/generar-video")
