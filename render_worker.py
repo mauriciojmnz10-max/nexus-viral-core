@@ -4,16 +4,12 @@ import subprocess
 import requests
 import uuid
 import asyncio
-import time
 import edge_tts
 from pydub import AudioSegment
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-AGNES_API_KEY = os.getenv("AGNES_API_KEY")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
-
-AGNES_BASE_URL = "https://apihub.agnes-ai.com/v1"
 
 def enviar_mensaje_telegram(texto):
     try:
@@ -24,7 +20,7 @@ def enviar_mensaje_telegram(texto):
 def buscar_en_coverr(query, output):
     url = "https://api.coverr.co/videos"
     
-    # Intento 1: Frase completa
+    # Intento 1: Frase exacta
     try:
         r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=15)
         if r.status_code == 200 and r.json().get("hits"):
@@ -55,32 +51,6 @@ def buscar_en_coverr(query, output):
             print(f"[COVERR] Error en intento 2: {e}")
 
     return False
-
-def generar_video_ia(prompt, output_file):
-    print(f"[AGNES] Fallback para: {prompt[:50]}...")
-    headers = {"Authorization": f"Bearer {AGNES_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "agnes-video-2.5-flash", "prompt": prompt, "seconds": "5", "mode": "text", "size": "720P", "aspect_ratio": "9:16"}
-    try:
-        r = requests.post(f"{AGNES_BASE_URL}/videos", headers=headers, json=payload, timeout=30)
-        if r.status_code != 200: return False
-        video_id = r.json().get("video_id")
-        if not video_id: return False
-        
-        for i in range(20): 
-            time.sleep(5)
-            poll_url = f"https://apihub.agnes-ai.com/agnesapi?video_id={video_id}&model_name=agnes-video-2.5-flash"
-            poll_r = requests.get(poll_url, headers={"Authorization": f"Bearer {AGNES_API_KEY}"}, timeout=15)
-            if poll_r.status_code == 200:
-                status_data = poll_r.json()
-                if status_data.get("status") == "completed":
-                    video_url = status_data.get("url")
-                    if video_url:
-                        with open(output_file, "wb") as f:
-                            f.write(requests.get(video_url, timeout=30).content)
-                        return True
-                elif status_data.get("status") == "failed": return False
-        return False
-    except: return False
 
 def descargar_clip_pixabay(query, output):
     try:
@@ -127,13 +97,15 @@ def main():
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
+            # 1. Coverr
             exito = buscar_en_coverr(scene["visual"], v_path)
             if not exito:
-                exito = generar_video_ia(scene["visual"], v_path)
+                # 2. Pixabay (respaldo)
+                print(f"[BG] Coverr falló para escena {i+1}. Usando Pixabay...")
+                exito = descargar_clip_pixabay(scene["visual"], v_path)
                 if not exito:
-                    exito = descargar_clip_pixabay(scene["visual"], v_path)
-                    if not exito:
-                        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", v_path], check=True, capture_output=True)
+                    # 3. Fondo de gradiente
+                    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", v_path], check=True, capture_output=True)
             videos.append(v_path)
 
         srt_path = os.path.join(work_dir, "subs.srt")
@@ -149,8 +121,8 @@ def main():
         for i in range(len(scenes)):
             inputs.extend(["-i", videos[i]])
             dur = len(AudioSegment.from_file(audios[i], format="mp3")) / 1000.0
-            # EFECTO ZOOM CINEMATOGRÁFICO
-            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,zoompan=z='min(zoom+0.0015,1.5)':d=125:s=480x854,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            # FILTRO DE COLOR CINEMATOGRÁFICO (Eq: Contraste y Saturación)
+            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,eq=contrast=1.2:saturation=1.3,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
