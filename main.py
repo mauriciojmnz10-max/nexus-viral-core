@@ -21,7 +21,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V41.0 // Stable Brain")
+app = FastAPI(title="Nexus V42.0 // Stable Brain")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -88,19 +88,29 @@ def generar_guion(tema: str, nicho: str):
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.85
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"} # FORZAMOS EL MODO JSON
     }
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=45)
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
+        
+        # Limpieza extrema por si la IA mete markdown o texto extra
         content = content.replace("```json", "").replace("```", "").strip()
+        start_idx = content.find("{")
+        end_idx = content.rfind("}") + 1
+        if start_idx != -1 and end_idx != 0:
+            content = content[start_idx:end_idx]
+            
         return json.loads(content)
     except Exception as e:
         log.error(f"[GROQ] Error: {e}")
+        # Enviamos el texto exacto que falló para poder diagnosticarlo
+        error_texto = content[:300] if 'content' in locals() else "No hay texto"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Groq Error:* {str(e)}"})
+                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Groq Error:* {str(e)}\n\n*Texto que falló:*\n{error_texto}"})
         return None
 
 def disparar_github(escenas, metadata):
@@ -139,7 +149,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V41.0"}
+    return {"status": "ONLINE", "engine": "Nexus V42.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
