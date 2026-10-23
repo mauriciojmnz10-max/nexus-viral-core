@@ -39,7 +39,7 @@ def generar_video_ia(prompt, output_file):
             
         print(f"[AGNES] Tarea creada: {video_id}.")
         
-        for i in range(60): # 5 minutos máximo
+        for i in range(60):
             time.sleep(5)
             poll_url = f"https://apihub.agnes-ai.com/agnesapi?video_id={video_id}&model_name=agnes-video-2.5-flash"
             poll_r = requests.get(poll_url, headers={"Authorization": f"Bearer {AGNES_API_KEY}"}, timeout=15)
@@ -91,8 +91,7 @@ async def gen_audio(texto, output):
         await communicate.save(output)
         print(f"Edge-TTS OK para: {texto[:20]}...")
     except Exception as e:
-        # SI EDGE-TTS FALLA, AVISAMOS A TELEGRAM EN LUGAR DE USAR gTTS
-        enviar_mensaje_telegram(f"❌ *Edge-TTS falló en GitHub:* {str(e)}\n\nPor favor, revisa la conexión o la librería. El video NO se generará con voz robótica.")
+        enviar_mensaje_telegram(f"❌ *Edge-TTS falló en GitHub:* {str(e)}")
         raise Exception(f"Edge-TTS falló: {e}")
 
 def main():
@@ -103,33 +102,27 @@ def main():
     metadata = json.loads(os.getenv("METADATA_JSON"))
 
     try:
-        # 1. Generar Audios
         audios = []
         for i, scene in enumerate(scenes):
             audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
             asyncio.run(gen_audio(scene["texto"], audio_path))
             audios.append(audio_path)
 
-        # 2. Unir Audios
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
         audio_maestro = os.path.join(work_dir, "audio_maestro.mp3")
         combined.export(audio_maestro, format="mp3")
 
-        # 3. Generar/Descargar Videos de Fondo
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
             exito = generar_video_ia(scene["visual"], v_path)
             if not exito:
-                # Si Agnes falla, intenta con Pixabay
                 exito = descargar_clip_pixabay(scene["visual"], v_path)
                 if not exito:
-                    # Si ambos fallan, fondo de degradado
                     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", v_path], check=True, capture_output=True)
             videos.append(v_path)
 
-        # 4. Generar SRT
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
@@ -138,7 +131,6 @@ def main():
                 f.write(f"{i+1}\n00:00:{int(t):02},{int((t%1)*1000):03} --> 00:00:{int(t+dur):02},{int(((t+dur)%1)*1000):03}\n{scene['texto']}\n\n")
                 t += dur
 
-        # 5. Ensamblar Video
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -155,7 +147,6 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_maestro, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
-        # 6. Enviar a Telegram
         caption = f"🎬 *NEXUS RENDER (IA)* 🎬\n\n🎯 *PLATAFORMA:* {metadata['plataforma']}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}\n\n🔗 *CTA:*\n{metadata['cta_link']}"
         
         with open(final_path, "rb") as video:
