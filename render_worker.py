@@ -148,12 +148,10 @@ def main():
         if os.path.exists(music_path):
             voz_seg = combined
             musica_seg = AudioSegment.from_file(music_path, format="mp3")
-            # Repetir música hasta que cubra la duración de la voz
             if len(musica_seg) < len(voz_seg):
                 repeticiones = (len(voz_seg) // len(musica_seg)) + 1
                 musica_seg = musica_seg * repeticiones
             musica_seg = musica_seg[:len(voz_seg)]
-            # Bajar volumen de la música al 12%
             musica_seg = musica_seg - 18 
             mezcla = voz_seg.overlay(musica_seg)
             mezcla.export(audio_final, format="mp3")
@@ -197,8 +195,10 @@ def main():
                 for k, bloque in enumerate(bloques):
                     start = t + (k * tiempo_por_bloque)
                     end = start + tiempo_por_bloque
+                    
+                    # CORRECCIÓN AQUÍ: Usamos raw string (r"...") para evitar el SyntaxError
                     if " A)" in bloque or " B)" in bloque:
-                        bloque = bloque.replace(" A)", "\NA)").replace(" B)", "\NB)").replace(" C)", "\NC)")
+                        bloque = bloque.replace(" A)", r"\NA)").replace(" B)", r"\NB)").replace(" C)", r"\NC)")
                     
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
