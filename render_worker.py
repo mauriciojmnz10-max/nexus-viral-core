@@ -10,7 +10,6 @@ from pydub import AudioSegment
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY") # NUEVA LLAVE
 AGNES_API_KEY = os.getenv("AGNES_API_KEY")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
@@ -22,31 +21,28 @@ def enviar_mensaje_telegram(texto):
                       data={"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def descargar_clip_pexels(query, output):
-    print(f"[PEXELS] Buscando: {query}")
+def descargar_clip_coverr(query, output):
+    """Busca en Coverr (Sin API Key, 50 req/hora)."""
+    print(f"[COVERR] Buscando: {query}")
     try:
-        url = "https://api.pexels.com/videos/search"
-        headers = {"Authorization": PEXELS_API_KEY}
-        params = {"query": query, "per_page": 3, "orientation": "portrait", "size": "medium"}
-        r = requests.get(url, headers=headers, params=params, timeout=15)
+        url = "https://api.coverr.co/videos"
+        params = {"query": query, "per_page": 3, "orientation": "portrait"}
+        r = requests.get(url, params=params, timeout=15)
         if r.status_code == 200:
-            videos = r.json().get("videos", [])
-            if videos:
-                # Tomamos el primer video y buscamos la mejor calidad
-                video_files = videos[0].get("video_files", [])
-                # Ordenamos por resolución para tomar la más pequeña que sirva
-                video_files.sort(key=lambda x: x.get("width", 9999))
-                for vf in video_files:
-                    if vf.get("link"):
-                        with open(output, "wb") as f:
-                            f.write(requests.get(vf["link"], timeout=30).content)
-                        return True
+            hits = r.json().get("hits", [])
+            if hits:
+                # Coverr devuelve los links de descarga directamente
+                video_url = hits[0].get("urls", {}).get("mp4_download") or hits[0].get("urls", {}).get("mp4")
+                if video_url:
+                    with open(output, "wb") as f:
+                        f.write(requests.get(video_url, timeout=30).content)
+                    return True
     except Exception as e:
-        print(f"[PEXELS] Error: {e}")
+        print(f"[COVERR] Error: {e}")
     return False
 
 def generar_video_ia(prompt, output_file):
-    # Si Pexels falla, intentamos con Agnes (pero puede fallar por saturación)
+    """Agnes AI como Plan B."""
     print(f"[AGNES] Fallback para: {prompt[:50]}...")
     headers = {"Authorization": f"Bearer {AGNES_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": "agnes-video-2.5-flash", "prompt": prompt, "seconds": "5", "mode": "text", "size": "720P", "aspect_ratio": "9:16"}
@@ -56,7 +52,7 @@ def generar_video_ia(prompt, output_file):
         video_id = r.json().get("video_id")
         if not video_id: return False
         
-        for i in range(30): # 2.5 minutos
+        for i in range(20): # 1.5 minutos máximo para no bloquear el proceso
             time.sleep(5)
             poll_url = f"https://apihub.agnes-ai.com/agnesapi?video_id={video_id}&model_name=agnes-video-2.5-flash"
             poll_r = requests.get(poll_url, headers={"Authorization": f"Bearer {AGNES_API_KEY}"}, timeout=15)
@@ -74,7 +70,7 @@ def generar_video_ia(prompt, output_file):
     except: return False
 
 def descargar_clip_pixabay(query, output):
-    # Último recurso
+    """Pixabay como último recurso."""
     try:
         url = "https://pixabay.com/api/videos/"
         params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
@@ -119,13 +115,13 @@ def main():
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
-            # 1. Intentar con Pexels (Alta calidad y precisión)
-            exito = descargar_clip_pexels(scene["visual"], v_path)
+            # 1. Coverr (Preciso y sin API Key)
+            exito = descargar_clip_coverr(scene["visual"], v_path)
             if not exito:
-                # 2. Intentar con Agnes (IA)
+                # 2. Agnes (IA)
                 exito = generar_video_ia(scene["visual"], v_path)
                 if not exito:
-                    # 3. Intentar con Pixabay (Fallback)
+                    # 3. Pixabay (Fallback)
                     exito = descargar_clip_pixabay(scene["visual"], v_path)
                     if not exito:
                         # 4. Fondo de gradiente (Último recurso)
@@ -156,7 +152,7 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_maestro, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
-        caption = f"🎬 *NEXUS RENDER (Pexels)* 🎬\n\n🎯 *PLATAFORMA:* {metadata['plataforma']}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}\n\n🔗 *CTA:*\n{metadata['cta_link']}"
+        caption = f"🎬 *NEXUS RENDER (Coverr)* 🎬\n\n🎯 *PLATAFORMA:* {metadata['plataforma']}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}\n\n🔗 *CTA:*\n{metadata['cta_link']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
