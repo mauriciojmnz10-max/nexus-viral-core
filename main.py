@@ -21,7 +21,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V33.0 // Hybrid Brain")
+app = FastAPI(title="Nexus V35.0 // Hybrid Brain")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -30,11 +30,12 @@ class VideoRequest(BaseModel):
 def generar_guion(tema: str, nicho: str):
     log.info(f"[GROQ] Generando guion para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
+    
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "cf-aig-authorization": f"Bearer {CF_AUTH_TOKEN}",
         "Content-Type": "application/json",
-        "User-Agent": "curl/8.0.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     prompt = f"""
@@ -49,8 +50,7 @@ def generar_guion(tema: str, nicho: str):
     REGLAS VISUALES (CRÍTICO):
     Para el campo "visual", escribe 1 o 2 palabras clave en INGLÉS (sustantivos o adjetivos). NO uses frases largas.
     Ejemplos válidos: "ancient pyramid", "dark forest", "glowing book", "space", "ocean", "mystery woman", "money", "sad man".
-    Usa palabras que Pixabay pueda encontrar fácilmente.
-
+    
     METADATOS:
     - Plataforma recomendada: "YouTube".
     - Un título adictivo de máximo 50 caracteres.
@@ -58,7 +58,7 @@ def generar_guion(tema: str, nicho: str):
     - 5 hashtags virales.
     - Un link o frase final para el CTA.
 
-    DEBES responder ÚNICAMENTE con un JSON válido, sin markdown:
+    DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura:
     {{
       "plataforma": "YouTube",
       "titulo": "Título adictivo",
@@ -83,18 +83,23 @@ def generar_guion(tema: str, nicho: str):
       ]
     }}
     """
+    
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.85,
-        "response_format": {"type": "json_object"}
+        "temperature": 0.85
     }
+    
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=45)
         r.raise_for_status()
-        return json.loads(r.json()["choices"][0]["message"]["content"])
+        content = r.json()["choices"][0]["message"]["content"]
+        content = content.replace("```json", "").replace("```", "").strip()
+        return json.loads(content)
     except Exception as e:
         log.error(f"[GROQ] Error: {e}")
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Groq Error:* {str(e)}"})
         return None
 
 def disparar_github(escenas, metadata):
@@ -103,8 +108,15 @@ def disparar_github(escenas, metadata):
     payload = {"event_type": "render_video", "client_payload": {"scenes": escenas, "metadata": metadata}}
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        return r.status_code == 204
-    except Exception:
+        if r.status_code == 204:
+            return True
+        else:
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                          data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *GitHub Error:* {r.status_code}\n{r.text}"})
+            return False
+    except Exception as e:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Excepción GitHub:* {str(e)}"})
         return False
 
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
@@ -123,12 +135,10 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
     if disparar_github(escenas, metadata):
         msg = f"🚀 *NEXUS HÍBRIDO* 🚀\n\nSe ha enviado el guion a GitHub Actions.\n\n📌 *Título:* {metadata['titulo']}\n🎯 *Plataforma:* {metadata['plataforma']}\n\n*El video llegará a este chat en unos minutos.*"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    else:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": "❌ Error al conectar con GitHub Actions."})
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V33.0"}
+    return {"status": "ONLINE", "engine": "Nexus V35.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
