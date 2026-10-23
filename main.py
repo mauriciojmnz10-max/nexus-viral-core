@@ -21,14 +21,14 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V42.0 // Stable Brain")
+app = FastAPI(title="Nexus V44.0 // Real Data Brain")
 
 class VideoRequest(BaseModel):
     tema: str
-    nicho: str = "drama"
+    nicho: str = "datos curiosos"
 
 def generar_guion(tema: str, nicho: str):
-    log.info(f"[GROQ] Generando guion para: {tema}")
+    log.info(f"[GROQ] Generando guion de datos reales para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     
     headers = {
@@ -39,25 +39,26 @@ def generar_guion(tema: str, nicho: str):
     }
     
     prompt = f"""
-    Actúa como un Guionista Senior experto en TikTok y YouTube Shorts.
-    Genera un guion de 14 escenas sobre: '{tema}', con un tono de {nicho}.
+    Actúa como un Investigador y Guionista Senior experto en YouTube Shorts (estilo documental de misterio y ciencia).
+    Genera un guion de 12 escenas sobre: '{tema}'.
     
-    REGLAS DE ORO:
-    1. GANCHO: La primera frase debe enganchar en 3 segundos.
-    2. RITMO: Usa comas, NO puntos y seguido. Frases rápidas.
-    3. LONGITUD: Exactamente entre 12 y 15 palabras por escena.
+    REGLAS DE ORO (CRÍTICO):
+    1. PROHIBIDO INVENTAR: Usa datos reales, matemáticas, proporciones, historia o ciencia. NADA de magia, fantasmas o trampas mortales.
+    2. GANCHO: Empieza con una pregunta matemática o un dato de impacto real. (Ej: "¿Sabías que si divides el perímetro de la pirámide entre su altura...?").
+    3. TONO: Analítico, de revelación intelectual. No es una película de terror, es un documental sorprendente.
+    4. RITMO: Frases rápidas, usa comas. Máximo 12 palabras por escena.
     
-    REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe EXACTAMENTE 3 palabras clave en INGLÉS (Sustantivo + Verbo/Acción + Lugar/Contexto).
-    NO uses frases largas. NO uses conceptos abstractos.
-    Ejemplos: "couple arguing kitchen", "pyramid desert night", "man crying rain", "money falling sky", "woman running forest".
+    REGLAS VISUALES (COHERENCIA ESTRICTA):
+    Para el campo "visual", escribe EXACTAMENTE 2 palabras clave en INGLÉS que representen objetos o lugares FÍSICOS y REALES de lo que habla el texto.
+    NO uses conceptos abstractos. 
+    Ejemplo: Si habla de la pirámide, escribe "pyramid egypt". Si habla de matemáticas, escribe "math compass". Si habla de satélites, escribe "satellite space". Si habla del sol, escribe "sun sky".
     
     METADATOS:
     - Plataforma recomendada: "YouTube".
-    - Un título adictivo de máximo 50 caracteres.
-    - Una descripción persuasiva de 2 líneas.
+    - Título adictivo (máx 50 caracteres).
+    - Descripción persuasiva.
     - 5 hashtags virales.
-    - Un link o frase final para el CTA.
+    - CTA final.
 
     DEBES responder ÚNICAMENTE con un JSON válido, sin markdown, con esta estructura:
     {{
@@ -67,20 +68,18 @@ def generar_guion(tema: str, nicho: str):
       "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5",
       "cta_link": "Link o frase final",
       "escenas": [
-        {{"texto": "Gancho neuro-persuasivo", "visual": "couple arguing kitchen"}},
-        {{"texto": "Secreto 1", "visual": "pyramid desert night"}},
-        {{"texto": "Secreto 2", "visual": "man crying rain"}},
-        {{"texto": "Dato oculto 1", "visual": "money falling sky"}},
-        {{"texto": "Dato oculto 2", "visual": "woman running forest"}},
-        {{"texto": "Giro inesperado", "visual": "ocean waves storm"}},
-        {{"texto": "Desarrollo 1", "visual": "city lights night"}},
-        {{"texto": "Desarrollo 2", "visual": "ancient temple ruins"}},
-        {{"texto": "Desarrollo 3", "visual": "fire burning dark"}},
-        {{"texto": "Revelación 1", "visual": "mystery woman silhouette"}},
-        {{"texto": "Revelación 2", "visual": "red rose petals"}},
-        {{"texto": "Clímax", "visual": "man screaming sky"}},
-        {{"texto": "Conclusión", "visual": "sunset horizon ocean"}},
-        {{"texto": "CTA final", "visual": "camera lens opening"}}
+        {{"texto": "Gancho matemático real", "visual": "pyramid egypt"}},
+        {{"texto": "Dato real 1", "visual": "math compass"}},
+        {{"texto": "Dato real 2", "visual": "stone blocks"}},
+        {{"texto": "Dato real 3", "visual": "stars sky"}},
+        {{"texto": "Dato real 4", "visual": "map coordinates"}},
+        {{"texto": "Dato real 5", "visual": "sun light"}},
+        {{"texto": "Dato real 6", "visual": "satellite space"}},
+        {{"texto": "Dato real 7", "visual": "ancient scroll"}},
+        {{"texto": "Dato real 8", "visual": "desert sand"}},
+        {{"texto": "Revelación 1", "visual": "egypt sphinx"}},
+        {{"texto": "Revelación 2", "visual": "microscope science"}},
+        {{"texto": "CTA final", "visual": "camera lens"}}
       ]
     }}
     """
@@ -88,29 +87,25 @@ def generar_guion(tema: str, nicho: str):
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-        "response_format": {"type": "json_object"} # FORZAMOS EL MODO JSON
+        "temperature": 0.5, # Bajamos la temperatura para que sea más preciso y menos creativo
+        "response_format": {"type": "json_object"}
     }
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=45)
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
-        
-        # Limpieza extrema por si la IA mete markdown o texto extra
         content = content.replace("```json", "").replace("```", "").strip()
         start_idx = content.find("{")
         end_idx = content.rfind("}") + 1
         if start_idx != -1 and end_idx != 0:
             content = content[start_idx:end_idx]
-            
         return json.loads(content)
     except Exception as e:
         log.error(f"[GROQ] Error: {e}")
-        # Enviamos el texto exacto que falló para poder diagnosticarlo
         error_texto = content[:300] if 'content' in locals() else "No hay texto"
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Groq Error:* {str(e)}\n\n*Texto que falló:*\n{error_texto}"})
+                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Groq Error:* {str(e)}\n\n*Texto:*\n{error_texto}"})
         return None
 
 def disparar_github(escenas, metadata):
@@ -119,16 +114,8 @@ def disparar_github(escenas, metadata):
     payload = {"event_type": "render_video", "client_payload": {"scenes": escenas, "metadata": metadata}}
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 204:
-            return True
-        else:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *GitHub Error:* {r.status_code}\n{r.text}"})
-            return False
-    except Exception as e:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                      data={"chat_id": TELEGRAM_CHAT_ID, "text": f"❌ *Excepción GitHub:* {str(e)}"})
-        return False
+        return r.status_code == 204
+    except: return False
 
 def procesar_video_en_segundo_plano(tema: str, nicho: str):
     data = generar_guion(tema, nicho)
@@ -149,11 +136,11 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V42.0"}
+    return {"status": "ONLINE", "engine": "Nexus V44.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
-    background_tasks.add_task(procesar_video_en_segundo_plano, "El secreto de la Gran Pirámide", "drama")
+    background_tasks.add_task(procesar_video_en_segundo_plano, "Los secretos matemáticos de la Gran Pirámide", "datos curiosos")
     return {"status": "ACCEPTED"}
 
 @app.post("/generar-video")
