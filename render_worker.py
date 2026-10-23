@@ -13,22 +13,41 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
 def descargar_clip(query, output):
+    # 1. Buscar en Pixabay
     try:
         url = "https://pixabay.com/api/videos/"
-        params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
+        params = {
+            "key": PIXABAY_API_KEY, 
+            "q": query, 
+            "per_page": 5, 
+            "orientation": "vertical", 
+            "video_type": "film"
+        }
         r = requests.get(url, params=params, timeout=15)
         if r.status_code == 200:
             hits = r.json().get("hits", [])
             if hits:
-                video_url = hits[0].get("videos", {}).get("small", {}).get("url")
-                if video_url:
-                    with open(output, "wb") as f:
-                        f.write(requests.get(video_url, timeout=30).content)
-                    return True
-    except: pass
-    # Fallback
-    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a1a2e:s=480x854:d=10,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", output], check=True, capture_output=True)
-    return True
+                for hit in hits:
+                    video_url = hit.get("videos", {}).get("medium", {}).get("url") or hit.get("videos", {}).get("small", {}).get("url")
+                    if video_url:
+                        print(f"Descargando de Pixabay: {query}")
+                        with open(output, "wb") as f:
+                            f.write(requests.get(video_url, timeout=30).content)
+                        return True
+    except Exception as e:
+        print(f"Error en Pixabay: {e}")
+
+    # 2. Fallback: Degradado elegante
+    print(f"Fallo Pixabay para '{query}'. Generando fondo degradado...")
+    try:
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", 
+            "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", output
+        ], check=True, capture_output=True)
+        return True
+    except Exception as e:
+        print(f"Error generando fondo: {e}")
+        return False
 
 async def gen_audio(texto, output):
     voice = "es-MX-JorgeNeural"
@@ -71,7 +90,7 @@ def main():
             f.write(f"{i+1}\n00:00:{int(t):02},{int((t%1)*1000):03} --> 00:00:{int(t+dur):02},{int(((t+dur)%1)*1000):03}\n{scene['texto']}\n\n")
             t += dur
 
-    # 5. Ensamblar Video (FFmpeg)
+    # 5. Ensamblar Video
     inputs = []
     filter_str = ""
     for i in range(len(scenes)):
