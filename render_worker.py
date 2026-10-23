@@ -7,10 +7,13 @@ import asyncio
 import edge_tts
 from pydub import AudioSegment
 import urllib.parse
+import shutil
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
+
+SFX_CLOCK = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"
 
 def enviar_mensaje_telegram(texto):
     try:
@@ -18,7 +21,30 @@ def enviar_mensaje_telegram(texto):
                       data={"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-# --- FUENTE 1: PIXABAY (Imágenes y Videos) ---
+def descargar_fondo_base(output_path):
+    try:
+        url = "https://pixabay.com/api/videos/"
+        params = {"key": PIXABAY_API_KEY, "q": "abstract background", "per_page": 1, "orientation": "vertical"}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200 and r.json().get("hits"):
+            video_url = r.json()["hits"][0].get("videos", {}).get("small", {}).get("url")
+            if video_url:
+                with open(output_path, "wb") as f:
+                    f.write(requests.get(video_url, timeout=15).content)
+                return True
+    except: pass
+    return False
+
+def descargar_sfx(url, output):
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            with open(output, "wb") as f:
+                f.write(r.content)
+            return True
+    except: pass
+    return False
+
 def buscar_pixabay(query, output_dir, es_video=False):
     try:
         url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
@@ -33,47 +59,16 @@ def buscar_pixabay(query, output_dir, es_video=False):
                         out_path = os.path.join(output_dir, f"pixabay_{uuid.uuid4().hex}.mp4")
                         with open(out_path, "wb") as f:
                             f.write(requests.get(video_url, timeout=15).content)
-                        return out_path, True
+                        return out_path
                 else:
                     img_url = hits[0].get("largeImageURL")
                     if img_url:
                         out_path = os.path.join(output_dir, f"pixabay_{uuid.uuid4().hex}.jpg")
                         with open(out_path, "wb") as f:
                             f.write(requests.get(img_url, timeout=15).content)
-                        return out_path, False
+                        return out_path
     except: pass
-    return None, None
-
-# --- FUENTE 2: WIKIPEDIA (Respaldo) ---
-def buscar_wikipedia(query, output_dir):
-    try:
-        search_url = f"https://en.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(query)}&prop=pageimages&format=json&pithumbsize=1000"
-        r = requests.get(search_url, timeout=10).json()
-        pages = r.get("query", {}).get("pages", {})
-        for page_id, page_data in pages.items():
-            if "thumbnail" in page_data:
-                img_url = page_data["thumbnail"]["source"]
-                out_path = os.path.join(output_dir, f"wiki_{uuid.uuid4().hex}.jpg")
-                with open(out_path, "wb") as f:
-                    f.write(requests.get(img_url, timeout=15).content)
-                return out_path, False
-    except: pass
-    return None, None
-
-# --- FUENTE 3: COVERR (Video de respaldo) ---
-def buscar_coverr(query, output_dir):
-    try:
-        url = "https://api.coverr.co/videos"
-        r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=5)
-        if r.status_code == 200 and r.json().get("hits"):
-            video_url = r.json()["hits"][0].get("urls", {}).get("mp4_download") or r.json()["hits"][0].get("urls", {}).get("mp4")
-            if video_url:
-                out_path = os.path.join(output_dir, f"coverr_{uuid.uuid4().hex}.mp4")
-                with open(out_path, "wb") as f:
-                    f.write(requests.get(video_url, timeout=15).content)
-                return out_path, True
-    except: pass
-    return None, None
+    return None
 
 def procesar_imagen_a_video(img_path, output_video, duracion):
     try:
@@ -107,13 +102,29 @@ def main():
     metadata = json.loads(os.getenv("METADATA_JSON"))
 
     try:
+        fondo_base_path = os.path.join(work_dir, "fondo_base.mp4")
+        tiene_fondo_base = descargar_fondo_base(fondo_base_path)
+        
+        reloj_path = os.path.join(work_dir, "reloj.mp3")
+        tiene_reloj = descargar_sfx(SFX_CLOCK, reloj_path)
+
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
             audio_path = os.path.join(work_dir, f"audio_{i}.mp3")
             asyncio.run(gen_audio(scene["texto"], audio_path))
+            
+            audio_segment = AudioSegment.from_file(audio_path, format="mp3")
+            
+            if scene["texto"].strip().endswith("?") and tiene_reloj:
+                print(f"[QUIZ] Añadiendo sonido de reloj a la escena {i+1}")
+                reloj_segment = AudioSegment.from_file(reloj_path, format="mp3")[:5000] 
+                reloj_segment = reloj_segment - 10 
+                audio_segment = audio_segment + reloj_segment
+                audio_segment.export(audio_path, format="mp3")
+            
             audios.append(audio_path)
-            duraciones.append(len(AudioSegment.from_file(audio_path, format="mp3")) / 1000.0)
+            duraciones.append(len(audio_segment) / 1000.0)
 
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
@@ -127,56 +138,41 @@ def main():
             query = scene["visual"]
             print(f"[ESCENA {i+1}] Buscando: {query}")
             
-            # 1. Pixabay (Imagen)
-            path, is_video = buscar_pixabay(query, work_dir, es_video=False)
+            path = buscar_pixabay(query, work_dir, es_video=False)
             if path:
-                print(f"  -> Pixabay Imagen: {path}")
                 procesar_imagen_a_video(path, final_bg, dur)
                 clips.append(final_bg)
                 continue
 
-            # 2. Pixabay (Video)
-            path, is_video = buscar_pixabay(query, work_dir, es_video=True)
+            path = buscar_pixabay(query, work_dir, es_video=True)
             if path:
-                print(f"  -> Pixabay Video: {path}")
                 os.rename(path, final_bg)
                 clips.append(final_bg)
                 continue
 
-            # 3. Wikipedia (Imagen)
-            path, is_video = buscar_wikipedia(query, work_dir)
-            if path:
-                print(f"  -> Wikipedia Imagen: {path}")
-                procesar_imagen_a_video(path, final_bg, dur)
+            if tiene_fondo_base:
+                print(f"  -> Usando FONDO BASE para escena {i+1}")
+                shutil.copy(fondo_base_path, final_bg)
                 clips.append(final_bg)
-                continue
-
-            # 4. Coverr (Video)
-            path, is_video = buscar_coverr(query, work_dir)
-            if path:
-                print(f"  -> Coverr Video: {path}")
-                os.rename(path, final_bg)
+            else:
+                subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
                 clips.append(final_bg)
-                continue
 
-            # 5. Gradiente (Último recurso)
-            print(f"  -> Gradiente para escena {i+1}")
-            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
-            clips.append(final_bg)
-
-        # Generar SRT
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
             for i, scene in enumerate(scenes):
                 dur = duraciones[i]
                 palabras = scene['texto'].split()
-                bloques = [" ".join(palabras[j:j+3]) for j in range(0, len(palabras), 3)]
+                bloques = [" ".join(palabras[j:j+4]) for j in range(0, len(palabras), 4)]
                 tiempo_por_bloque = dur / len(bloques) if bloques else dur
                 
                 for k, bloque in enumerate(bloques):
                     start = t + (k * tiempo_por_bloque)
                     end = start + tiempo_por_bloque
+                    if " A)" in bloque or " B)" in bloque:
+                        bloque = bloque.replace(" A)", "\NA)").replace(" B)", "\NB)").replace(" C)", "\NC)")
+                    
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
@@ -185,7 +181,10 @@ def main():
         for i in range(len(scenes)):
             inputs.extend(["-i", clips[i]])
             dur = duraciones[i]
-            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            if os.path.basename(clips[i]) == "bg_" + str(i) + ".mp4" and tiene_fondo_base and "pixabay" not in clips[i]:
+                filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,loop=-1:size=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            else:
+                filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
@@ -198,7 +197,7 @@ def main():
         subprocess.run(cmd, check=True, capture_output=True)
 
         nicho_usado = metadata.get("nicho_usado", "No especificado")
-        caption = f"🎬 *NEXUS RENDER (Híbrido)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
+        caption = f"🎬 *NEXUS RENDER (Quiz Master Pro)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
