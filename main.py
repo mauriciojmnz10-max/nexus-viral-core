@@ -22,26 +22,52 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V51.0 // Rotation & Hybrid")
+app = FastAPI(title="Nexus V54.0 // Ultimate Rotation")
 
-# --- SISTEMA DE ROTACIÓN DE CONTENIDO ---
-TEMAS_FINANZAS = ["El error de las tarjetas de crédito", "Cómo ahorrar sin darte cuenta", "La trampa de los préstamos rápidos"]
-TEMAS_TECNOLOGIA = ["La IA que te quitará el trabajo", "El gadget que ahorra energía", "Cómo proteger tu privacidad en internet"]
-TEMAS_MISTERIO = ["El secreto de la Gran Pirámide", "Las coordenadas del Triángulo de las Bermudas", "El código oculto en la Mona Lisa"]
-QUIZ_CULTURA = ["Quiz: ¿Cuánto sabes de historia universal?", "Quiz: Adivina el país por su bandera", "Quiz: Preguntas de ciencia básica"]
+# --- SISTEMA DE ROTACIÓN ESTRICTA (Anti-repetición) ---
+TEMAS_POOL = [
+    # Finanzas
+    {"tema": "El error de las tarjetas de crédito", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "Cómo ahorrar sin darte cuenta", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "La trampa de los préstamos rápidos", "nicho": "finanzas", "modo": "normal"},
+    # Tecnología
+    {"tema": "La IA que te quitará el trabajo", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "El gadget que ahorra energía", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "Cómo proteger tu privacidad en internet", "nicho": "tecnologia", "modo": "normal"},
+    # Legal / Derecho
+    {"tema": "Tus derechos si te detiene la policía", "nicho": "legal", "modo": "normal"},
+    {"tema": "El error legal que comete el 90% al firmar un contrato", "nicho": "legal", "modo": "normal"},
+    # Salud / Bienestar
+    {"tema": "El hábito que destruye tu sueño", "nicho": "salud", "modo": "normal"},
+    {"tema": "Por qué el azúcar oculta en los alimentos te enferma", "nicho": "salud", "modo": "normal"},
+    # Motivación
+    {"tema": "La regla de los 5 segundos para vencer la pereza", "nicho": "motivacion", "modo": "normal"},
+    # Historia
+    {"tema": "El secreto oculto de la Gran Muralla China", "nicho": "historia", "modo": "normal"},
+    # Misterio
+    {"tema": "El código oculto en la Mona Lisa", "nicho": "misterio", "modo": "normal"},
+    # Quiz
+    {"tema": "Quiz: ¿Cuánto sabes de historia universal?", "nicho": "cultura general", "modo": "quiz"},
+    {"tema": "Quiz: Adivina el país por su bandera", "nicho": "geografia", "modo": "quiz"},
+    {"tema": "Quiz: Preguntas de ciencia básica", "nicho": "ciencia", "modo": "quiz"},
+    {"tema": "Quiz: ¿Cuánto sabes de cine?", "nicho": "cine", "modo": "quiz"}
+]
+
+# Cola global que se vacía y se rellena
+COLA_TEMAS = []
 
 def obtener_tema_aleatorio():
-    categorias = ["finanzas", "tecnologia", "misterio", "quiz"]
-    categoria = random.choice(categorias)
+    global COLA_TEMAS
+    if not COLA_TEMAS:
+        # Si la cola está vacía, la rellenamos con todos los temas y la desordenamos
+        COLA_TEMAS = TEMAS_POOL.copy()
+        random.shuffle(COLA_TEMAS)
+        log.info("[ROTACIÓN] Cola de temas rellenada y desordenada.")
     
-    if categoria == "finanzas":
-        return random.choice(TEMAS_FINANZAS), "finanzas", "normal"
-    elif categoria == "tecnologia":
-        return random.choice(TEMAS_TECNOLOGIA), "tecnologia", "normal"
-    elif categoria == "misterio":
-        return random.choice(TEMAS_MISTERIO), "misterio", "normal"
-    else:
-        return random.choice(QUIZ_CULTURA), "cultura general", "quiz"
+    # Sacamos el primer tema de la cola
+    seleccion = COLA_TEMAS.pop(0)
+    log.info(f"[ROTACIÓN] Tema seleccionado: {seleccion['tema']}")
+    return seleccion["tema"], seleccion["nicho"], seleccion["modo"]
 
 class VideoRequest(BaseModel):
     tema: str
@@ -62,24 +88,25 @@ def generar_guion(tema: str, nicho: str, modo: str):
     if modo == "quiz":
         prompt = f"""
         Actúa como un creador de contenido de entretenimiento para YouTube Shorts.
-        Genera un guion tipo QUIZ de 12 escenas sobre: '{tema}'.
+        Genera un guion tipo QUIZ de 8 escenas sobre: '{tema}'.
         
-        ESTRUCTURA:
+        ESTRUCTURA (OBLIGATORIA):
         1. GANCHO: "Solo el 1% puede responder esto..."
-        2. Pregunta 1 (Escena 2) y Respuesta 1 (Escena 3).
-        3. Pregunta 2 (Escena 4) y Respuesta 2 (Escena 5).
-        4. Pregunta 3 (Escena 6) y Respuesta 3 (Escena 7).
-        5. Cierre: "¿Cuántas acertaste? Comenta tu puntuación".
+        2. Pregunta 1 (Escena 2): Escribe la pregunta y las 3 opciones en el mismo texto. (Ej: "¿Cuál es el planeta rojo? A) Venus B) Marte C) Júpiter").
+        3. Respuesta 1 (Escena 3): Solo el texto de la respuesta correcta y una breve explicación.
+        4. Pregunta 2 (Escena 4) y Respuesta 2 (Escena 5).
+        5. Pregunta 3 (Escena 6) y Respuesta 3 (Escena 7).
+        6. Cierre (Escena 8): "¿Cuántas acertaste? Comenta tu puntuación".
         
         REGLAS VISUALES:
-        Para el campo "visual", escribe 2 palabras clave en INGLÉS relacionadas con el tema o con "question mark", "brain".
+        Para el campo "visual", escribe 2 palabras clave en INGLÉS (ej. "question mark", "brain", "science").
         """
     else:
         prompt = f"""
         Actúa como un Educador y Experto en {nicho} para YouTube Shorts.
         Genera un guion de 12 escenas sobre: '{tema}'.
         
-        ESTRUCTURA NARRATIVA:
+        ESTRUCTURA:
         1. GANCHO: Plantea un error, pérdida o dato impactante.
         2. DESARROLLO: Explicación paso a paso.
         3. CIERRE: Recomendación y CTA.
@@ -101,7 +128,6 @@ def generar_guion(tema: str, nicho: str, modo: str):
         {"texto": "Texto de la escena", "visual": "keyword"}
       ]
     }
-    (Asegúrate de generar 12 escenas)
     """
     
     payload = {
@@ -153,7 +179,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str, modo: str = "normal")
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V51.0"}
+    return {"status": "ONLINE", "engine": "Nexus V54.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
