@@ -20,7 +20,7 @@ def enviar_mensaje_telegram(texto):
 def buscar_en_coverr(query, output):
     url = "https://api.coverr.co/videos"
     
-    # Intento 1: Frase exacta
+    # Intento 1: Frase exacta (3 palabras)
     try:
         r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=15)
         if r.status_code == 200 and r.json().get("hits"):
@@ -33,7 +33,7 @@ def buscar_en_coverr(query, output):
     except Exception as e:
         print(f"[COVERR] Error en intento 1: {e}")
 
-    # Intento 2: Solo las primeras 2 palabras
+    # Intento 2: Si falla, buscamos solo las primeras 2 palabras
     palabras = query.split()
     if len(palabras) > 2:
         query_corta = " ".join(palabras[:2])
@@ -53,6 +53,7 @@ def buscar_en_coverr(query, output):
     return False
 
 def descargar_clip_pixabay(query, output):
+    """Respaldo por si Coverr falla."""
     try:
         url = "https://pixabay.com/api/videos/"
         params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
@@ -97,10 +98,10 @@ def main():
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
-            # 1. Coverr
+            # 1. Coverr (Principal)
             exito = buscar_en_coverr(scene["visual"], v_path)
             if not exito:
-                # 2. Pixabay (respaldo)
+                # 2. Pixabay (Respaldo)
                 print(f"[BG] Coverr falló para escena {i+1}. Usando Pixabay...")
                 exito = descargar_clip_pixabay(scene["visual"], v_path)
                 if not exito:
@@ -121,7 +122,7 @@ def main():
         for i in range(len(scenes)):
             inputs.extend(["-i", videos[i]])
             dur = len(AudioSegment.from_file(audios[i], format="mp3")) / 1000.0
-            # FILTRO DE COLOR CINEMATOGRÁFICO (Eq: Contraste y Saturación)
+            # Filtro de color cinematográfico y escala
             filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,eq=contrast=1.2:saturation=1.3,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
