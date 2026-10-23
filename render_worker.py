@@ -45,6 +45,33 @@ def descargar_clip_coverr(query, output):
     except: pass
     return False
 
+def procesar_imagen_a_video(img_path, output_video, duracion):
+    """Convierte una imagen estática en un video con zoom (Ken Burns) de forma segura."""
+    try:
+        # 1. Convertir imagen a MP4 estático (forzando yuv420p para evitar errores)
+        temp_mp4 = output_video.replace(".mp4", "_temp.mp4")
+        cmd_convert = [
+            "ffmpeg", "-y", "-loop", "1", "-i", img_path,
+            "-t", "1", "-vf", "scale=800:1422,format=yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast", temp_mp4
+        ]
+        subprocess.run(cmd_convert, check=True, capture_output=True)
+
+        # 2. Aplicar zoom (Ken Burns) al MP4 temporal
+        frames = int(duracion * 30)
+        cmd_zoom = [
+            "ffmpeg", "-y", "-i", temp_mp4,
+            "-vf", f"zoompan=z='min(zoom+0.0015,1.5)':d={frames}:s=480x854",
+            "-t", str(duracion), "-c:v", "libx264", "-preset", "ultrafast", output_video
+        ]
+        subprocess.run(cmd_zoom, check=True, capture_output=True)
+        
+        if os.path.exists(temp_mp4): os.remove(temp_mp4)
+        return True
+    except Exception as e:
+        print(f"[ERROR IMAGEN] {e}")
+        return False
+
 async def gen_audio(texto, output):
     voice = "es-ES-ElviraNeural" 
     try:
@@ -61,6 +88,7 @@ def main():
     metadata = json.loads(os.getenv("METADATA_JSON"))
 
     try:
+        # 1. Generar Audios
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
@@ -74,29 +102,31 @@ def main():
         audio_maestro = os.path.join(work_dir, "audio_maestro.mp3")
         combined.export(audio_maestro, format="mp3")
 
+        # 2. Descargar Fondos (Imagen o Video)
         clips = []
         for i, scene in enumerate(scenes):
             img_path = os.path.join(work_dir, f"img_{i}.jpg")
             vid_path = os.path.join(work_dir, f"vid_{i}.mp4")
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
+            dur = duraciones[i]
             
-            exito_wiki = descargar_imagen_wikipedia(scene["visual"], img_path)
-            
-            if exito_wiki:
-                dur = duraciones[i]
-                cmd_zoom = [
-                    "ffmpeg", "-y", "-loop", "1", "-i", img_path,
-                    "-vf", f"scale=800:1422,zoompan=z='min(zoom+0.0015,1.5)':d={int(dur*30)}:s=480x854",
-                    "-t", str(dur), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", final_bg
-                ]
-                subprocess.run(cmd_zoom, check=True, capture_output=True)
+            # 1. Intentar Wikipedia (Imagen)
+            if descargar_imagen_wikipedia(scene["visual"], img_path):
+                print(f"[WIKI] Procesando imagen para escena {i+1}")
+                if not procesar_imagen_a_video(img_path, final_bg, dur):
+                    # Si falla el procesamiento de la imagen, intentar Coverr
+                    if not descargar_clip_coverr(scene["visual"], final_bg):
+                        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             else:
-                if not descargar_clip_coverr(scene["visual"], vid_path):
-                    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", vid_path], check=True, capture_output=True)
-                os.rename(vid_path, final_bg)
+                # 2. Intentar Coverr (Video)
+                print(f"[COVERR] Buscando video para escena {i+1}")
+                if not descargar_clip_coverr(scene["visual"], final_bg):
+                    # 3. Gradiente (Último recurso)
+                    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             
             clips.append(final_bg)
 
+        # 3. Generar SRT (Subtítulos cortos)
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
@@ -113,6 +143,7 @@ def main():
                 
                 t += dur
 
+        # 4. Ensamblar Video Final
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
