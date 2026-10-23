@@ -20,58 +20,52 @@ def enviar_mensaje_telegram(texto):
 def buscar_en_coverr(query, output):
     url = "https://api.coverr.co/videos"
     
-    # Intento 1: Frase exacta (3 palabras)
+    # Intento 1: Frase exacta
     try:
-        r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=15)
+        r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=5)
         if r.status_code == 200 and r.json().get("hits"):
             video_url = r.json()["hits"][0].get("urls", {}).get("mp4_download") or r.json()["hits"][0].get("urls", {}).get("mp4")
             if video_url:
                 with open(output, "wb") as f:
-                    f.write(requests.get(video_url, timeout=30).content)
-                print(f"[COVERR] Éxito con: {query}")
+                    f.write(requests.get(video_url, timeout=10).content)
                 return True
-    except Exception as e:
-        print(f"[COVERR] Error en intento 1: {e}")
+    except: pass
 
-    # Intento 2: Si falla, buscamos solo las primeras 2 palabras
+    # Intento 2: Buscar con la primera palabra
     palabras = query.split()
-    if len(palabras) > 2:
-        query_corta = " ".join(palabras[:2])
-        print(f"[COVERR] Reintentando con: {query_corta}")
+    if len(palabras) > 1:
+        query_corta = palabras[0]
         try:
-            r = requests.get(url, params={"query": query_corta, "per_page": 1, "orientation": "portrait"}, timeout=15)
+            r = requests.get(url, params={"query": query_corta, "per_page": 1, "orientation": "portrait"}, timeout=5)
             if r.status_code == 200 and r.json().get("hits"):
                 video_url = r.json()["hits"][0].get("urls", {}).get("mp4_download") or r.json()["hits"][0].get("urls", {}).get("mp4")
                 if video_url:
                     with open(output, "wb") as f:
-                        f.write(requests.get(video_url, timeout=30).content)
-                    print(f"[COVERR] Éxito con: {query_corta}")
+                        f.write(requests.get(video_url, timeout=10).content)
                     return True
-        except Exception as e:
-            print(f"[COVERR] Error en intento 2: {e}")
+        except: pass
 
     return False
 
 def descargar_clip_pixabay(query, output):
-    """Respaldo por si Coverr falla."""
     try:
         url = "https://pixabay.com/api/videos/"
         params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(url, params=params, timeout=5)
         if r.status_code == 200 and r.json().get("hits"):
             video_url = r.json()["hits"][0].get("videos", {}).get("small", {}).get("url")
             if video_url:
                 with open(output, "wb") as f:
-                    f.write(requests.get(video_url, timeout=30).content)
+                    f.write(requests.get(video_url, timeout=10).content)
                 return True
     except: pass
     return False
 
 async def gen_audio(texto, output):
-    voice = "es-MX-JorgeNeural"
+    # Voz de Álvaro (España) - Tono documental
+    voice = "es-ES-AlvaroNeural" 
     try:
-        communicate = edge_tts.Communicate(texto, voice)
-        await communicate.save(output)
+        await asyncio.wait_for(edge_tts.Communicate(texto, voice).save(output), timeout=15)
     except Exception as e:
         enviar_mensaje_telegram(f"❌ *Edge-TTS falló:* {str(e)}")
         raise Exception(f"Edge-TTS falló: {e}")
@@ -98,11 +92,10 @@ def main():
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
-            # 1. Coverr (Principal)
+            # 1. Coverr
             exito = buscar_en_coverr(scene["visual"], v_path)
             if not exito:
-                # 2. Pixabay (Respaldo)
-                print(f"[BG] Coverr falló para escena {i+1}. Usando Pixabay...")
+                # 2. Pixabay
                 exito = descargar_clip_pixabay(scene["visual"], v_path)
                 if not exito:
                     # 3. Fondo de gradiente
@@ -122,8 +115,8 @@ def main():
         for i in range(len(scenes)):
             inputs.extend(["-i", videos[i]])
             dur = len(AudioSegment.from_file(audios[i], format="mp3")) / 1000.0
-            # Filtro de color cinematográfico y escala
-            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,eq=contrast=1.2:saturation=1.3,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            # Filtro de color cinematográfico
+            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,eq=contrast=1.1:saturation=1.1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
