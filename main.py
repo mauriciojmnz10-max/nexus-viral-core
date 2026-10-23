@@ -21,14 +21,14 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V46.0 // Stable Render")
+app = FastAPI(title="Nexus V48.0 // Hybrid Visual")
 
 class VideoRequest(BaseModel):
     tema: str
     nicho: str = "datos curiosos"
 
 def generar_guion(tema: str, nicho: str):
-    log.info(f"[GROQ] Generando guion viral para: {tema}")
+    log.info(f"[GROQ] Generando guion para: {tema}")
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     
     headers = {
@@ -43,16 +43,17 @@ def generar_guion(tema: str, nicho: str):
     Genera un guion de 12 escenas sobre: '{tema}'.
     
     ESTRUCTURA NARRATIVA:
-    1. GANCHO (Escena 1): Plantea una paradoja ilegal o un desafío a la lógica.
-    2. DESARROLLO (Escenas 2-10): Revelación progresiva. Un dato técnico, seguido de una consecuencia asombrosa. Frases cortas y directas.
-    3. CIERRE (Escenas 11-12): Genera debate y pide suscripción.
-
-    REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe EXACTAMENTE 2 palabras clave en INGLÉS que representen objetos físicos y reales.
-    Si el guion habla de estrellas, pon "stars sky". Si habla de pirámides, pon "pyramid egypt".
+    1. GANCHO: Paradoja o desafío lógico.
+    2. DESARROLLO: Revelación progresiva. Dato técnico + Consecuencia asombrosa.
+    3. CIERRE: Debate y suscripción.
     
+    REGLAS VISUALES (CRÍTICO):
+    Para el campo "visual", escribe EXACTAMENTE 2 o 3 palabras clave en INGLÉS que representen el objeto FÍSICO exacto de la escena.
+    Si habla de la Gran Pirámide, pon "Great Pyramid of Giza". Si habla de constelaciones, pon "Orion constellation".
+    NO uses conceptos abstractos.
+
     METADATOS:
-    - Plataforma recomendada: "YouTube".
+    - Plataforma: "YouTube".
     - Título adictivo (máx 50 caracteres).
     - Descripción persuasiva.
     - 5 hashtags virales.
@@ -66,16 +67,16 @@ def generar_guion(tema: str, nicho: str):
       "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5",
       "cta_link": "Link o frase final",
       "escenas": [
-        {{"texto": "Gancho de paradoja real", "visual": "pyramid egypt"}},
-        {{"texto": "Dato técnico 1", "visual": "math compass"}},
+        {{"texto": "Gancho de paradoja real", "visual": "Great Pyramid of Giza"}},
+        {{"texto": "Dato técnico 1", "visual": "compass math"}},
         {{"texto": "Consecuencia asombrosa 1", "visual": "stone blocks"}},
-        {{"texto": "Dato técnico 2", "visual": "stars sky"}},
-        {{"texto": "Consecuencia asombrosa 2", "visual": "map coordinates"}},
+        {{"texto": "Dato técnico 2", "visual": "Orion constellation"}},
+        {{"texto": "Consecuencia asombrosa 2", "visual": "world map coordinates"}},
         {{"texto": "Dato técnico 3", "visual": "sun light"}},
         {{"texto": "Consecuencia asombrosa 3", "visual": "satellite space"}},
         {{"texto": "Dato técnico 4", "visual": "ancient scroll"}},
         {{"texto": "Consecuencia asombrosa 4", "visual": "desert sand"}},
-        {{"texto": "Revelación final", "visual": "egypt sphinx"}},
+        {{"texto": "Revelación final", "visual": "Great Sphinx of Giza"}},
         {{"texto": "Pregunta de debate", "visual": "microscope science"}},
         {{"texto": "CTA y suscripción", "visual": "camera lens"}}
       ]
@@ -130,7 +131,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V46.0"}
+    return {"status": "ONLINE", "engine": "Nexus V48.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
