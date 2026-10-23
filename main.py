@@ -21,7 +21,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V45.0 // Hormozi Brain")
+app = FastAPI(title="Nexus V46.0 // Stable Render")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -39,13 +39,13 @@ def generar_guion(tema: str, nicho: str):
     }
     
     prompt = f"""
-    Actúa como un Guionista Viral Senior de TikTok (estilo Alex Hormozi).
+    Actúa como un Guionista Viral Senior de TikTok.
     Genera un guion de 12 escenas sobre: '{tema}'.
     
-    ESTRUCTURA NARRATIVA (OBLIGATORIA):
-    1. GANCHO (Escena 1): Plantea una paradoja ilegal o un desafío a la lógica. (Ej: "Los científicos tardaron siglos en darse cuenta de que la Gran Pirámide esconde una fórmula matemática ilegal...").
-    2. DESARROLLO (Escenas 2-10): Revelación progresiva. Un dato técnico, seguido de una consecuencia asombrosa. No satures de números seguidos. Usa frases cortas y directas.
-    3. CIERRE (Escenas 11-12): Genera debate. (Ej: "¿Crees que fue ingeniería humana o tecnología antigua? Déjamelo en los comentarios y suscríbete").
+    ESTRUCTURA NARRATIVA:
+    1. GANCHO (Escena 1): Plantea una paradoja ilegal o un desafío a la lógica.
+    2. DESARROLLO (Escenas 2-10): Revelación progresiva. Un dato técnico, seguido de una consecuencia asombrosa. Frases cortas y directas.
+    3. CIERRE (Escenas 11-12): Genera debate y pide suscripción.
 
     REGLAS VISUALES (CRÍTICO):
     Para el campo "visual", escribe EXACTAMENTE 2 palabras clave en INGLÉS que representen objetos físicos y reales.
@@ -130,7 +130,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V45.0"}
+    return {"status": "ONLINE", "engine": "Nexus V46.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
