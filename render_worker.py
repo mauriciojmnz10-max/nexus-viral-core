@@ -21,28 +21,42 @@ def enviar_mensaje_telegram(texto):
                       data={"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def descargar_clip_coverr(query, output):
-    """Busca en Coverr (Sin API Key, 50 req/hora)."""
-    print(f"[COVERR] Buscando: {query}")
+def buscar_en_coverr(query, output):
+    url = "https://api.coverr.co/videos"
+    
+    # Intento 1: Frase completa
     try:
-        url = "https://api.coverr.co/videos"
-        params = {"query": query, "per_page": 3, "orientation": "portrait"}
-        r = requests.get(url, params=params, timeout=15)
-        if r.status_code == 200:
-            hits = r.json().get("hits", [])
-            if hits:
-                # Coverr devuelve los links de descarga directamente
-                video_url = hits[0].get("urls", {}).get("mp4_download") or hits[0].get("urls", {}).get("mp4")
+        r = requests.get(url, params={"query": query, "per_page": 1, "orientation": "portrait"}, timeout=15)
+        if r.status_code == 200 and r.json().get("hits"):
+            video_url = r.json()["hits"][0].get("urls", {}).get("mp4_download") or r.json()["hits"][0].get("urls", {}).get("mp4")
+            if video_url:
+                with open(output, "wb") as f:
+                    f.write(requests.get(video_url, timeout=30).content)
+                print(f"[COVERR] Éxito con: {query}")
+                return True
+    except Exception as e:
+        print(f"[COVERR] Error en intento 1: {e}")
+
+    # Intento 2: Solo las primeras 2 palabras
+    palabras = query.split()
+    if len(palabras) > 2:
+        query_corta = " ".join(palabras[:2])
+        print(f"[COVERR] Reintentando con: {query_corta}")
+        try:
+            r = requests.get(url, params={"query": query_corta, "per_page": 1, "orientation": "portrait"}, timeout=15)
+            if r.status_code == 200 and r.json().get("hits"):
+                video_url = r.json()["hits"][0].get("urls", {}).get("mp4_download") or r.json()["hits"][0].get("urls", {}).get("mp4")
                 if video_url:
                     with open(output, "wb") as f:
                         f.write(requests.get(video_url, timeout=30).content)
+                    print(f"[COVERR] Éxito con: {query_corta}")
                     return True
-    except Exception as e:
-        print(f"[COVERR] Error: {e}")
+        except Exception as e:
+            print(f"[COVERR] Error en intento 2: {e}")
+
     return False
 
 def generar_video_ia(prompt, output_file):
-    """Agnes AI como Plan B."""
     print(f"[AGNES] Fallback para: {prompt[:50]}...")
     headers = {"Authorization": f"Bearer {AGNES_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": "agnes-video-2.5-flash", "prompt": prompt, "seconds": "5", "mode": "text", "size": "720P", "aspect_ratio": "9:16"}
@@ -52,7 +66,7 @@ def generar_video_ia(prompt, output_file):
         video_id = r.json().get("video_id")
         if not video_id: return False
         
-        for i in range(20): # 1.5 minutos máximo para no bloquear el proceso
+        for i in range(20): 
             time.sleep(5)
             poll_url = f"https://apihub.agnes-ai.com/agnesapi?video_id={video_id}&model_name=agnes-video-2.5-flash"
             poll_r = requests.get(poll_url, headers={"Authorization": f"Bearer {AGNES_API_KEY}"}, timeout=15)
@@ -64,13 +78,11 @@ def generar_video_ia(prompt, output_file):
                         with open(output_file, "wb") as f:
                             f.write(requests.get(video_url, timeout=30).content)
                         return True
-                elif status_data.get("status") == "failed":
-                    return False
+                elif status_data.get("status") == "failed": return False
         return False
     except: return False
 
 def descargar_clip_pixabay(query, output):
-    """Pixabay como último recurso."""
     try:
         url = "https://pixabay.com/api/videos/"
         params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "video_type": "film"}
@@ -115,16 +127,12 @@ def main():
         videos = []
         for i, scene in enumerate(scenes):
             v_path = os.path.join(work_dir, f"bg_{i}.mp4")
-            # 1. Coverr (Preciso y sin API Key)
-            exito = descargar_clip_coverr(scene["visual"], v_path)
+            exito = buscar_en_coverr(scene["visual"], v_path)
             if not exito:
-                # 2. Agnes (IA)
                 exito = generar_video_ia(scene["visual"], v_path)
                 if not exito:
-                    # 3. Pixabay (Fallback)
                     exito = descargar_clip_pixabay(scene["visual"], v_path)
                     if not exito:
-                        # 4. Fondo de gradiente (Último recurso)
                         subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", v_path], check=True, capture_output=True)
             videos.append(v_path)
 
@@ -141,7 +149,8 @@ def main():
         for i in range(len(scenes)):
             inputs.extend(["-i", videos[i]])
             dur = len(AudioSegment.from_file(audios[i], format="mp3")) / 1000.0
-            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            # EFECTO ZOOM CINEMATOGRÁFICO
+            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,zoompan=z='min(zoom+0.0015,1.5)':d=125:s=480x854,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
@@ -152,7 +161,7 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_maestro, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
-        caption = f"🎬 *NEXUS RENDER (Coverr)* 🎬\n\n🎯 *PLATAFORMA:* {metadata['plataforma']}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}\n\n🔗 *CTA:*\n{metadata['cta_link']}"
+        caption = f"🎬 *NEXUS RENDER (Coverr Pro)* 🎬\n\n🎯 *PLATAFORMA:* {metadata['plataforma']}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}\n\n🔗 *CTA:*\n{metadata['cta_link']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
