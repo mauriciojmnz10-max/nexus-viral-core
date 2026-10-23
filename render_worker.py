@@ -22,13 +22,7 @@ def enviar_mensaje_telegram(texto):
 def buscar_pixabay(query, output_dir, es_video=False):
     try:
         url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
-        params = {
-            "key": PIXABAY_API_KEY, 
-            "q": query, 
-            "per_page": 3, 
-            "orientation": "vertical", 
-            "safesearch": "true"
-        }
+        params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "safesearch": "true"}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
             hits = r.json().get("hits", [])
@@ -126,7 +120,6 @@ def main():
         audio_maestro = os.path.join(work_dir, "audio_maestro.mp3")
         combined.export(audio_maestro, format="mp3")
 
-        # LÓGICA DE BÚSQUEDA HÍBRIDA (Pixabay -> Wikipedia -> Coverr)
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
@@ -187,7 +180,6 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # Ensamblar Video
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -206,7 +198,7 @@ def main():
         subprocess.run(cmd, check=True, capture_output=True)
 
         nicho_usado = metadata.get("nicho_usado", "No especificado")
-        caption = f"🎬 *NEXUS RENDER (High CPM)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
+        caption = f"🎬 *NEXUS RENDER (Híbrido)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
