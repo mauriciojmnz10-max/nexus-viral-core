@@ -21,7 +21,7 @@ CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
 CF_GATEWAY_ID = "i-a" 
 CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-app = FastAPI(title="Nexus V38.0 // Hybrid Brain")
+app = FastAPI(title="Nexus V40.0 // Stable Brain")
 
 class VideoRequest(BaseModel):
     tema: str
@@ -48,10 +48,10 @@ def generar_guion(tema: str, nicho: str):
     3. LONGITUD: Exactamente entre 12 y 15 palabras por escena.
     
     REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe una DESCRIPCIÓN DETALLADA en INGLÉS de 4 o 5 palabras que describa exactamente lo que se debe ver.
-    Ejemplo: "ancient golden pyramid desert night", "mysterious dark forest fog", "sad man crying rain".
-    NO uses frases largas ni abstractas. Usa palabras clave que Coverr pueda encontrar.
-
+    Para el campo "visual", escribe EXACTAMENTE 3 palabras clave en INGLÉS (Sustantivo + Verbo/Acción + Lugar/Contexto).
+    NO uses frases largas. NO uses conceptos abstractos.
+    Ejemplos: "couple arguing kitchen", "pyramid desert night", "man crying rain", "money falling sky", "woman running forest".
+    
     METADATOS:
     - Plataforma recomendada: "YouTube".
     - Un título adictivo de máximo 50 caracteres.
@@ -67,20 +67,20 @@ def generar_guion(tema: str, nicho: str):
       "hashtags": "#tag1 #tag2 #tag3 #tag4 #tag5",
       "cta_link": "Link o frase final",
       "escenas": [
-        {{"texto": "Gancho neuro-persuasivo", "visual": "ancient golden pyramid desert"}},
-        {{"texto": "Secreto 1", "visual": "mysterious dark forest fog"}},
-        {{"texto": "Secreto 2", "visual": "sad man crying rain"}},
-        {{"texto": "Dato oculto 1", "visual": "glowing book dark room"}},
-        {{"texto": "Dato oculto 2", "visual": "space galaxy stars"}},
+        {{"texto": "Gancho neuro-persuasivo", "visual": "couple arguing kitchen"}},
+        {{"texto": "Secreto 1", "visual": "pyramid desert night"}},
+        {{"texto": "Secreto 2", "visual": "man crying rain"}},
+        {{"texto": "Dato oculto 1", "visual": "money falling sky"}},
+        {{"texto": "Dato oculto 2", "visual": "woman running forest"}},
         {{"texto": "Giro inesperado", "visual": "ocean waves storm"}},
-        {{"texto": "Desarrollo 1", "visual": "money cash falling"}},
-        {{"texto": "Desarrollo 2", "visual": "city night lights"}},
-        {{"texto": "Desarrollo 3", "visual": "ancient ruins temple"}},
-        {{"texto": "Revelación 1", "visual": "mysterious woman silhouette"}},
+        {{"texto": "Desarrollo 1", "visual": "city lights night"}},
+        {{"texto": "Desarrollo 2", "visual": "ancient temple ruins"}},
+        {{"texto": "Desarrollo 3", "visual": "fire burning dark"}},
+        {{"texto": "Revelación 1", "visual": "mystery woman silhouette"}},
         {{"texto": "Revelación 2", "visual": "red rose petals"}},
-        {{"texto": "Clímax", "visual": "fire burning"}},
-        {{"texto": "Conclusión", "visual": "sunset horizon"}},
-        {{"texto": "CTA final", "visual": "camera lens"}}
+        {{"texto": "Clímax", "visual": "man screaming sky"}},
+        {{"texto": "Conclusión", "visual": "sunset horizon ocean"}},
+        {{"texto": "CTA final", "visual": "camera lens opening"}}
       ]
     }}
     """
@@ -139,7 +139,7 @@ def procesar_video_en_segundo_plano(tema: str, nicho: str):
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V38.0"}
+    return {"status": "ONLINE", "engine": "Nexus V40.0"}
 
 @app.post("/generar-tendencias")
 async def generar_tendencias_default(background_tasks: BackgroundTasks):
