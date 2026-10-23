@@ -1,0 +1,36 @@
+name: Nexus Video Render
+
+on:
+  repository_dispatch:
+    types: [render_video]
+
+jobs:
+  build_video:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      - name: Install Python Dependencies
+        run: |
+          pip install requests pydub gTTS edge-tts
+
+      - name: Run Render Script
+        env:
+          # Estos datos vienen desde Render en el payload
+          SCENES_JSON: ${{ toJson(github.event.client_payload.scenes) }}
+          METADATA_JSON: ${{ toJson(github.event.client_payload.metadata) }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python render_worker.py
