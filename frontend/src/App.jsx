@@ -1,5 +1,5 @@
 import { useState } from "react";
-import "./index.css";
+import "../index.css"; // <--- Ruta corregida
 
 export default function App() {
   const [form, setForm] = useState({ negocio: "", nicho: "Belleza", tono: "Divertido", tema: "" });
@@ -94,4 +94,4 @@ export default function App() {
       </main>
     </div>
   );
-      }
+              }
