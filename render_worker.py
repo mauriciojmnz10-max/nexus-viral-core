@@ -13,7 +13,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
-# Música y SFX (URLs directas de Mixkit/Pixabay)
+# Música y SFX
 MUSIC_MISTERIO = "https://assets.mixkit.co/music/preview/mixkit-mysterious-dark-and-mysterious-ambient-1005.mp3"
 MUSIC_FINANZAS = "https://assets.mixkit.co/music/preview/mixkit-modern-logo-3-1191.mp3"
 MUSIC_QUIZ = "https://assets.mixkit.co/music/preview/mixkit-game-level-3-2076.mp3"
@@ -102,8 +102,16 @@ def main():
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
     os.makedirs(work_dir, exist_ok=True)
 
-    scenes = json.loads(os.getenv("SCENES_JSON"))
-    metadata = json.loads(os.getenv("METADATA_JSON"))
+    # Recibir datos desde la App Web (a través de GitHub Actions)
+    scenes_json = os.getenv("SCENES_JSON")
+    metadata_json = os.getenv("METADATA_JSON")
+
+    if not scenes_json or scenes_json == "null":
+        print("No hay datos de escenas para procesar.")
+        return
+
+    scenes = json.loads(scenes_json)
+    metadata = json.loads(metadata_json)
     nicho = metadata.get("nicho_usado", "").lower()
 
     try:
@@ -113,7 +121,6 @@ def main():
         reloj_path = os.path.join(work_dir, "reloj.mp3")
         tiene_reloj = descargar_audio(SFX_CLOCK, reloj_path)
 
-        # --- SELECCIÓN DE MÚSICA SEGÚN NICHO ---
         music_path = os.path.join(work_dir, "music.mp3")
         if "quiz" in nicho:
             descargar_audio(MUSIC_QUIZ, music_path)
@@ -131,7 +138,6 @@ def main():
             audio_segment = AudioSegment.from_file(audio_path, format="mp3")
             
             if scene["texto"].strip().endswith("?") and tiene_reloj:
-                print(f"[QUIZ] Añadiendo sonido de reloj a la escena {i+1}")
                 reloj_segment = AudioSegment.from_file(reloj_path, format="mp3")[:5000] 
                 reloj_segment = reloj_segment - 10 
                 audio_segment = audio_segment + reloj_segment
@@ -143,7 +149,6 @@ def main():
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
         
-        # --- MEZCLAR VOZ CON MÚSICA DE FONDO ---
         audio_final = os.path.join(work_dir, "audio_maestro.mp3")
         if os.path.exists(music_path):
             voz_seg = combined
@@ -196,7 +201,6 @@ def main():
                     start = t + (k * tiempo_por_bloque)
                     end = start + tiempo_por_bloque
                     
-                    # CORRECCIÓN AQUÍ: Usamos raw string (r"...") para evitar el SyntaxError
                     if " A)" in bloque or " B)" in bloque:
                         bloque = bloque.replace(" A)", r"\NA)").replace(" B)", r"\NB)").replace(" C)", r"\NC)")
                     
@@ -224,7 +228,7 @@ def main():
         subprocess.run(cmd, check=True, capture_output=True)
 
         nicho_usado = metadata.get("nicho_usado", "No especificado")
-        caption = f"🎬 *NEXUS RENDER (Cinematic Shield)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}\n\n🏷️ *HASHTAGS:*\n{metadata['hashtags']}"
+        caption = f"🎬 *NEXUS STUDIO (Web)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
