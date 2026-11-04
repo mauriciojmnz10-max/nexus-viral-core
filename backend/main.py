@@ -296,12 +296,11 @@ app = FastAPI(title="Nexus Studio API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=["*"],  # <--- FORZAMOS EL ASTERISCO AQUÍ
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
 
 def require_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
     if settings.api_key and not secrets.compare_digest(x_api_key or "", settings.api_key):
