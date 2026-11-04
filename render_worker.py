@@ -6,9 +6,9 @@ import uuid
 import asyncio
 import edge_tts
 from pydub import AudioSegment
-import urllib.parse
 import shutil
 
+# --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
@@ -23,7 +23,8 @@ def enviar_mensaje_telegram(texto):
     try:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       data={"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+    except Exception as e:
+        print(f"[ERROR TELEGRAM] {e}")
 
 def descargar_fondo_base(output_path):
     try:
@@ -102,19 +103,26 @@ def main():
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
     os.makedirs(work_dir, exist_ok=True)
 
-    # Recibir datos desde la App Web (a través de GitHub Actions)
+    # 1. RECIBIR DATOS DESDE GITHUB ACTIONS (Enviados por el Backend de Render)
     scenes_json = os.getenv("SCENES_JSON")
     metadata_json = os.getenv("METADATA_JSON")
 
     if not scenes_json or scenes_json == "null":
-        print("No hay datos de escenas para procesar.")
+        print("❌ No hay datos de escenas para procesar. Abortando.")
+        return
+        
+    if not metadata_json or metadata_json == "null":
+        print("❌ No hay metadatos para procesar. Abortando.")
         return
 
     scenes = json.loads(scenes_json)
     metadata = json.loads(metadata_json)
     nicho = metadata.get("nicho_usado", "").lower()
 
+    print(f"✅ Iniciando renderizado para: {metadata.get('titulo', 'Video')}")
+
     try:
+        # 2. DESCARGAR ASSETS BASE (Fondo y Música)
         fondo_base_path = os.path.join(work_dir, "fondo_base.mp4")
         tiene_fondo_base = descargar_fondo_base(fondo_base_path)
         
@@ -129,6 +137,7 @@ def main():
         else:
             descargar_audio(MUSIC_MISTERIO, music_path)
 
+        # 3. GENERAR AUDIOS POR ESCENA
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
@@ -137,6 +146,7 @@ def main():
             
             audio_segment = AudioSegment.from_file(audio_path, format="mp3")
             
+            # Lógica del reloj para Quizzes (si la frase termina en '?')
             if scene["texto"].strip().endswith("?") and tiene_reloj:
                 reloj_segment = AudioSegment.from_file(reloj_path, format="mp3")[:5000] 
                 reloj_segment = reloj_segment - 10 
@@ -146,6 +156,7 @@ def main():
             audios.append(audio_path)
             duraciones.append(len(audio_segment) / 1000.0)
 
+        # 4. MEZCLAR AUDIO MAESTRO (Voz + Música)
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
         
@@ -163,6 +174,7 @@ def main():
         else:
             combined.export(audio_final, format="mp3")
 
+        # 5. DESCARGAR VIDEOS/IMÁGENES DE FONDO
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
@@ -188,6 +200,7 @@ def main():
                 subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
                 clips.append(final_bg)
 
+        # 6. GENERAR SUBTÍTULOS (SRT)
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
@@ -207,12 +220,15 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
+        # 7. ENSAMBLAR VIDEO FINAL CON FFMPEG
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
             inputs.extend(["-i", clips[i]])
             dur = duraciones[i]
-            if os.path.basename(clips[i]) == "bg_" + str(i) + ".mp4" and tiene_fondo_base and "pixabay" not in clips[i]:
+            
+            # Si el clip es el fondo base, lo ponemos en loop
+            if os.path.basename(clips[i]) == f"bg_{i}.mp4" and tiene_fondo_base and "pixabay" not in clips[i]:
                 filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,loop=-1:size=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
             else:
                 filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
@@ -227,14 +243,18 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_final, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
+        # 8. ENVIAR A TELEGRAM
         nicho_usado = metadata.get("nicho_usado", "No especificado")
         caption = f"🎬 *NEXUS STUDIO (Web)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}"
         
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
+        
+        print("✅ Video enviado a Telegram con éxito.")
 
     except Exception as e:
-        enviar_mensaje_telegram(f"❌ *Error crítico:* {str(e)}")
+        print(f"❌ Error crítico: {e}")
+        enviar_mensaje_telegram(f"❌ *Error crítico en el renderizado:* {str(e)}")
 
 if __name__ == "__main__":
     main()
