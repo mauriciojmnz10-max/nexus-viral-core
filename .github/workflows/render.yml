@@ -27,11 +27,8 @@ jobs:
 
       - name: Run Render Script
         env:
-          # Aquí se reciben los datos del backend (backend/services.py)
           SCENES_JSON: ${{ toJson(github.event.client_payload.scenes) }}
           METADATA_JSON: ${{ toJson(github.event.client_payload.metadata) }}
-          
-          # Variables de entorno secretas
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
