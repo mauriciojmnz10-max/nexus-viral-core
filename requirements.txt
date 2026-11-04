@@ -1,8 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 gunicorn
 requests
 python-dotenv
 gTTS
 pydub
 edge-tts
+pydantic-settings
+httpx
