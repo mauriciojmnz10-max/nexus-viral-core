@@ -1,31 +1,44 @@
 import logging
-from fastapi import FastAPI, BackgroundTasks
-from pydantic import BaseModel
-from config import TELEGRAM_TOKEN
-from services import obtener_tema_aleatorio, procesar_video_async
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from config import settings
 
-logging.basicConfig(level=logging.INFO)
+# Importamos los routers modulares
+from routers import telegram_bot
+# from routers import micro_apps # Descomenta cuando tengas el router de micro-apps
+
+# Configuración de logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("nexus.main")
 
-app = FastAPI(title="Nexus V56.0 // Arquitectura Modular")
+# Inicialización de la App
+app = FastAPI(
+    title="Nexus Viral Core",
+    description="Arquitectura modular asíncrona para automatización de video.",
+    version="2.0.0"
+)
 
-class VideoRequest(BaseModel):
-    tema: str
-    nicho: str = "auto"
-    modo: str = "normal"
+# CORS (Permite que Vercel y tu Dashboard se conecten)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Cambia esto por tu URL de Vercel en producción
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Montamos los routers
+app.include_router(telegram_bot.router)
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V56.0 (Modular)"}
+    return {
+        "sistema": "Nexus Viral Core",
+        "status": "ONLINE",
+        "arquitectura": "Modular / Async",
+        "modulos": ["Telegram Webhook"]
+    }
 
-@app.post("/generar-tendencias")
-async def generar_tendencias_default(background_tasks: BackgroundTasks):
-    tema, nicho, modo = obtener_tema_aleatorio()
-    # Procesamos en segundo plano con la función asíncrona segura
-    background_tasks.add_task(procesar_video_async, tema, nicho, modo)
-    return {"status": "ACCEPTED", "tema": tema}
-
-@app.post("/generar-video")
-async def generar_video_personalizado(request: VideoRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(procesar_video_async, request.tema, request.nicho, request.modo)
-    return {"status": "ACCEPTED"}
+@app.get("/api/v1/health")
+async def health():
+    return {"ok": True, "servicio": "nexus-studio", "motor": "github"}
