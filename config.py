@@ -1,65 +1,64 @@
 import os
-from pydantic_settings import BaseSettings
-from pydantic import Field
 from dotenv import load_dotenv
 
 load_dotenv()
 
-class Settings(BaseSettings):
-    # --- Telegram ---
-    TELEGRAM_TOKEN: str = Field(default="", env="TELEGRAM_TOKEN")
-    TELEGRAM_CHAT_ID: str = Field(default="", env="TELEGRAM_CHAT_ID")
-    TELEGRAM_WEBHOOK_SECRET: str = Field(default="", env="TELEGRAM_WEBHOOK_SECRET")
+# --- CREDENCIALES ---
+GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
+TELEGRAM_TOKEN = (os.getenv("TELEGRAM_TOKEN") or "").strip()
+TELEGRAM_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+GITHUB_TOKEN = (os.getenv("GITHUB_TOKEN") or "").strip()
+GITHUB_OWNER = (os.getenv("GITHUB_OWNER") or "").strip()
+GITHUB_REPO = (os.getenv("GITHUB_REPO") or "").strip()
 
-    # --- Supabase ---
-    SUPABASE_URL: str = Field(default="", env="SUPABASE_URL")
-    SUPABASE_KEY: str = Field(default="", env="SUPABASE_KEY")
+CF_ACCOUNT_ID = "ead76709dc92c64a480ffca88bbc1b29"
+CF_GATEWAY_ID = "i-a" 
+CF_AUTH_TOKEN = (os.getenv("CF_AUTH_TOKEN") or "").strip()
 
-    # --- IAs ---
-    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
-    DEEPSEEK_API_KEY: str = Field(default="", env="DEEPSEEK_API_KEY")
-    CLAUDE_API_KEY: str = Field(default="", env="CLAUDE_API_KEY")
-    GROQ_API_KEY: str = Field(default="", env="GROQ_API_KEY")
-
-    # --- GitHub & Cloudflare ---
-    GITHUB_TOKEN: str = Field(default="", env="GITHUB_TOKEN")
-    GITHUB_OWNER: str = Field(default="", env="GITHUB_OWNER")
-    GITHUB_REPO: str = Field(default="", env="GITHUB_REPO")
-    CF_AUTH_TOKEN: str = Field(default="", env="CF_AUTH_TOKEN")
-    
-    # Valores por defecto para Cloudflare (o cárgalos de env si prefieres)
-    CF_ACCOUNT_ID: str = os.getenv("CF_ACCOUNT_ID", "ead76709dc92c64a480ffca88bbc1b29")
-    CF_GATEWAY_ID: str = os.getenv("CF_GATEWAY_ID", "i-a")
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-
-# Instancia global de la configuración
-settings = Settings()
-
-# ==============================================================================
-# RETROCOMPATIBILIDAD: Alias globales
-# ==============================================================================
-# Esto permite que `from config import TELEGRAM_TOKEN` siga funcionando
-# en los archivos que aún no hemos refactorizado. ¡Adiós al ImportError!
-# ==============================================================================
-
-TELEGRAM_TOKEN = settings.TELEGRAM_TOKEN
-TELEGRAM_CHAT_ID = settings.TELEGRAM_CHAT_ID
-TELEGRAM_WEBHOOK_SECRET = settings.TELEGRAM_WEBHOOK_SECRET
-
-SUPABASE_URL = settings.SUPABASE_URL
-SUPABASE_KEY = settings.SUPABASE_KEY
-
-GEMINI_API_KEY = settings.GEMINI_API_KEY
-DEEPSEEK_API_KEY = settings.DEEPSEEK_API_KEY
-CLAUDE_API_KEY = settings.CLAUDE_API_KEY
-GROQ_API_KEY = settings.GROQ_API_KEY
-
-GITHUB_TOKEN = settings.GITHUB_TOKEN
-GITHUB_OWNER = settings.GITHUB_OWNER
-GITHUB_REPO = settings.GITHUB_REPO
-CF_AUTH_TOKEN = settings.CF_AUTH_TOKEN
-CF_ACCOUNT_ID = settings.CF_ACCOUNT_ID
-CF_GATEWAY_ID = settings.CF_GATEWAY_ID
+# --- POOL DE TEMAS ---
+TEMAS_POOL = [
+    # Finanzas
+    {"tema": "El error de las tarjetas de crédito", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "Cómo ahorrar sin darte cuenta", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "La trampa de los préstamos rápidos", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "El interés compuesto explicado en 60s", "nicho": "finanzas", "modo": "normal"},
+    {"tema": "Por qué los ricos no tienen deudas", "nicho": "finanzas", "modo": "normal"},
+    # Tecnología / IA
+    {"tema": "La IA que te quitará el trabajo", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "El gadget que ahorra energía", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "Cómo proteger tu privacidad en internet", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "El futuro de los coches autónomos", "nicho": "tecnologia", "modo": "normal"},
+    {"tema": "La verdad sobre el 5G", "nicho": "tecnologia", "modo": "normal"},
+    # Legal / Derecho
+    {"tema": "Tus derechos si te detiene la policía", "nicho": "legal", "modo": "normal"},
+    {"tema": "El error legal al firmar un contrato", "nicho": "legal", "modo": "normal"},
+    {"tema": "Cómo reclamar una multa injusta", "nicho": "legal", "modo": "normal"},
+    # Salud / Bienestar
+    {"tema": "El hábito que destruye tu sueño", "nicho": "salud", "modo": "normal"},
+    {"tema": "Por qué el azúcar oculto te enferma", "nicho": "salud", "modo": "normal"},
+    {"tema": "La verdad sobre las dietas milagro", "nicho": "salud", "modo": "normal"},
+    # Psicología Oscura
+    {"tema": "Cómo manipulan tu mente los anuncios", "nicho": "psicologia", "modo": "normal"},
+    {"tema": "El sesgo cognitivo que te hace gastar", "nicho": "psicologia", "modo": "normal"},
+    {"tema": "La técnica de persuasión de la CIA", "nicho": "psicologia", "modo": "normal"},
+    # Motivación / Éxito
+    {"tema": "La regla de los 5 segundos para vencer la pereza", "nicho": "motivacion", "modo": "normal"},
+    {"tema": "Cómo levantarte a las 5 AM sin morir", "nicho": "motivacion", "modo": "normal"},
+    {"tema": "El secreto de los estoicos para ser feliz", "nicho": "motivacion", "modo": "normal"},
+    # Historia / Crímenes
+    {"tema": "El secreto oculto de la Gran Muralla China", "nicho": "historia", "modo": "normal"},
+    {"tema": "El crimen que cambió la historia de Roma", "nicho": "historia", "modo": "normal"},
+    {"tema": "La verdad sobre Jack el Destripador", "nicho": "historia", "modo": "normal"},
+    # Misterio / Ciencia
+    {"tema": "El código oculto en la Mona Lisa", "nicho": "misterio", "modo": "normal"},
+    {"tema": "El Triángulo de las Bermudas: la verdad", "nicho": "misterio", "modo": "normal"},
+    {"tema": "¿Qué hay dentro de un agujero negro?", "nicho": "ciencia", "modo": "normal"},
+    {"tema": "El experimento de la prisión de Stanford", "nicho": "ciencia", "modo": "normal"},
+    # Quiz
+    {"tema": "Quiz: ¿Cuánto sabes de historia universal?", "nicho": "cultura general", "modo": "quiz"},
+    {"tema": "Quiz: Adivina el país por su bandera", "nicho": "geografia", "modo": "quiz"},
+    {"tema": "Quiz: Preguntas de ciencia básica", "nicho": "ciencia", "modo": "quiz"},
+    {"tema": "Quiz: ¿Cuánto sabes de cine?", "nicho": "cine", "modo": "quiz"},
+    {"tema": "Quiz: Preguntas de cultura pop", "nicho": "cultura pop", "modo": "quiz"},
+    {"tema": "Quiz: Matemáticas rápidas", "nicho": "matematicas", "modo": "quiz"}
+]
