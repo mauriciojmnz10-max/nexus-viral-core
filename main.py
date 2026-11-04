@@ -8,15 +8,18 @@ from services import obtener_tema_aleatorio, procesar_video_async
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("nexus.main")
 
-app = FastAPI(title="Nexus V57.0 // Producción con CORS")
+app = FastAPI(title="Nexus V58.0 // CORS Definitivo")
 
-# 1. CONFIGURACIÓN DE CORS (Permite que Vercel se conecte sin bloqueos)
+# 1. CONFIGURACIÓN DE CORS (DEBE IR ANTES DE CUALQUIER RUTA)
+# Usamos allow_origin_regex para aceptar todos los dominios de Vercel (producción y previews)
+# y allow_origins=["*"] como respaldo para otros orígenes.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # En pruebas permitimos todos.
+    allow_origins=["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app", # <--- ESTO ES LA CLAVE PARA VERCELL
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=["*"], # Permitimos todas las cabeceras para evitar bloqueos
 )
 
 # --- MODELOS DE DATOS ---
@@ -31,11 +34,11 @@ class FrontendRequest(BaseModel):
     tono: Optional[str] = "Divertido"
     tema: str
 
-# --- RUTAS PARA EL BOT / CRON-JOB ---
+# --- RUTAS ---
 
 @app.get("/")
 async def root():
-    return {"status": "ONLINE", "engine": "Nexus V57.0"}
+    return {"status": "ONLINE", "engine": "Nexus V58.0"}
 
 @app.get("/api/health")
 async def health():
@@ -52,7 +55,7 @@ async def generar_video_personalizado(request: VideoRequest, background_tasks: B
     background_tasks.add_task(procesar_video_async, request.tema, request.nicho, request.modo)
     return {"status": "ACCEPTED"}
 
-# --- RUTA PUENTE PARA LA APP WEB (VERCEL) ---
+# --- RUTA PUENTE PARA VERCELL ---
 
 @app.post("/api/generar")
 async def generar_desde_web(request: FrontendRequest, background_tasks: BackgroundTasks):
