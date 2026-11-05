@@ -34,21 +34,18 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
     
     prompt = f"""
     Actúa como un Director de Cine y Guionista Viral Senior.
-    Aquí tienes los datos del cliente:
-    {tema}
+    Datos: {tema}
     
-    REGLAS DEL TEXTO (CRÍTICO):
-    - El guion DEBE mencionar el "Nombre del negocio".
-    - El tono DEBE ser exactamente el solicitado.
-    - Debes incluir TODOS los "Puntos clave a mencionar".
+    REGLAS DEL TEXTO:
+    - Menciona el nombre del negocio.
+    - Tono: {nicho}.
     - Gancho de 3 segundos ultra-adictivo.
-    - Frases cortas, directas, con comas.
     - Máximo 15 palabras por escena.
 
     REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe EXACTAMENTE 2 PALABRAS EN INGLÉS que representen objetos físicos y concretos.
-    Ejemplo: "melted cheese", "barber scissors", "money cash", "fitness gym".
-    NO uses frases largas ni conceptos abstractos.
+    Para el campo "visual", escribe SOLO 1 PALABRA EN INGLÉS que represente el objeto físico principal de la escena.
+    Ejemplo: "cheese", "scissors", "money", "gym", "doctor", "car", "phone".
+    NO uses frases largas. Solo 1 palabra concreta.
     
     Devuelve SOLO un JSON válido con esta estructura exacta:
     {{
@@ -58,7 +55,7 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         "hashtags": "#tag1 #tag2 #tag3",
         "cta_link": "CTA",
         "escenas": [
-            {{"texto": "Texto de la escena", "visual": "keyword1 keyword2"}}
+            {{"texto": "Texto de la escena", "visual": "single_word"}}
         ]
     }}
     """
