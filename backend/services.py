@@ -3,6 +3,7 @@ import random
 import json
 import requests
 import asyncio
+import time
 from config import (
     GROQ_API_KEY, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO,
     CF_ACCOUNT_ID, CF_GATEWAY_ID, CF_AUTH_TOKEN, TEMAS_POOL
@@ -46,8 +47,6 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
 
     REGLAS VISUALES (CRÍTICO):
     Para el campo "visual", escribe SOLO 1 PALABRA EN INGLÉS que represente el objeto físico principal de la escena.
-    Ejemplo: "cheese", "scissors", "money", "gym", "doctor", "car", "phone".
-    NO uses frases largas. Solo 1 palabra concreta.
     
     Devuelve SOLO un JSON válido con esta estructura exacta:
     {{
@@ -66,11 +65,17 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         "model": "openai/gpt-oss-120b", 
         "messages": [{"role": "user", "content": prompt}], 
         "temperature": 0.7, 
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "max_tokens": 4096  # <--- AUMENTAMOS LA MEMORIA PARA 25 ESCENAS
     }
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if r.status_code == 429:
+            log.warning("⚠️ Límite de Groq alcanzado. Esperando 10 segundos antes de reintentar...")
+            time.sleep(10)
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
         content = content.replace("```json", "").replace("```", "").strip()
