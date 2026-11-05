@@ -8,7 +8,6 @@ import edge_tts
 from pydub import AudioSegment
 import shutil
 
-# --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
@@ -23,22 +22,7 @@ def enviar_mensaje_telegram(texto):
     try:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
                       data={"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
-    except Exception as e:
-        print(f"[ERROR TELEGRAM] {e}")
-
-def descargar_fondo_base(output_path):
-    try:
-        url = "https://pixabay.com/api/videos/"
-        params = {"key": PIXABAY_API_KEY, "q": "abstract background", "per_page": 1, "orientation": "vertical"}
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200 and r.json().get("hits"):
-            video_url = r.json()["hits"][0].get("videos", {}).get("small", {}).get("url")
-            if video_url:
-                with open(output_path, "wb") as f:
-                    f.write(requests.get(video_url, timeout=15).content)
-                return True
     except: pass
-    return False
 
 def descargar_audio(url, output):
     try:
@@ -50,37 +34,33 @@ def descargar_audio(url, output):
     except: pass
     return False
 
-def buscar_pixabay(query, output_dir, es_video=False):
+def buscar_pixabay(query, output_dir):
+    """Busca imágenes en alta calidad en lugar de videos aleatorios."""
     try:
-        url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
-        params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "safesearch": "true"}
+        url = "https://pixabay.com/api/"
+        params = {"key": PIXABAY_API_KEY, "q": query, "per_page": 3, "orientation": "vertical", "safesearch": "true", "image_type": "photo"}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
             hits = r.json().get("hits", [])
             if hits:
-                if es_video:
-                    video_url = hits[0].get("videos", {}).get("small", {}).get("url")
-                    if video_url:
-                        out_path = os.path.join(output_dir, f"pixabay_{uuid.uuid4().hex}.mp4")
-                        with open(out_path, "wb") as f:
-                            f.write(requests.get(video_url, timeout=15).content)
-                        return out_path
-                else:
-                    img_url = hits[0].get("largeImageURL")
-                    if img_url:
-                        out_path = os.path.join(output_dir, f"pixabay_{uuid.uuid4().hex}.jpg")
-                        with open(out_path, "wb") as f:
-                            f.write(requests.get(img_url, timeout=15).content)
-                        return out_path
+                img_url = hits[0].get("largeImageURL")
+                if img_url:
+                    out_path = os.path.join(output_dir, f"pixabay_{uuid.uuid4().hex}.jpg")
+                    with open(out_path, "wb") as f:
+                        f.write(requests.get(img_url, timeout=15).content)
+                    return out_path
     except: pass
     return None
 
 def procesar_imagen_a_video(img_path, output_video, duracion):
+    """Convierte la imagen en video con el efecto cinematográfico Ken Burns."""
     try:
         temp_mp4 = output_video.replace(".mp4", "_temp.mp4")
+        # Primero convertimos la imagen a video
         cmd_convert = ["ffmpeg", "-y", "-loop", "1", "-i", img_path, "-t", "1", "-vf", "scale=800:1422,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", temp_mp4]
         subprocess.run(cmd_convert, check=True, capture_output=True)
         
+        # Luego aplicamos el zoom (Ken Burns) sobre el video generado
         frames = int(duracion * 30)
         cmd_zoom = ["ffmpeg", "-y", "-i", temp_mp4, "-vf", f"zoompan=z='min(zoom+0.0015,1.5)':d={frames}:s=480x854", "-t", str(duracion), "-c:v", "libx264", "-preset", "ultrafast", output_video]
         subprocess.run(cmd_zoom, check=True, capture_output=True)
@@ -103,31 +83,21 @@ def main():
     work_dir = f"/tmp/nexus_{uuid.uuid4().hex}"
     os.makedirs(work_dir, exist_ok=True)
 
-    # 1. RECIBIR DATOS DESDE GITHUB ACTIONS (Enviados por el Backend de Render)
     scenes_json = os.getenv("SCENES_JSON")
     metadata_json = os.getenv("METADATA_JSON")
 
     if not scenes_json or scenes_json == "null":
-        print("❌ No hay datos de escenas para procesar. Abortando.")
-        return
-        
-    if not metadata_json or metadata_json == "null":
-        print("❌ No hay metadatos para procesar. Abortando.")
+        print("❌ No hay datos de escenas.")
         return
 
     scenes = json.loads(scenes_json)
     metadata = json.loads(metadata_json)
     nicho = metadata.get("nicho_usado", "").lower()
 
-    print(f"✅ Iniciando renderizado para: {metadata.get('titulo', 'Video')}")
-
     try:
-        # 2. DESCARGAR ASSETS BASE (Fondo y Música)
-        fondo_base_path = os.path.join(work_dir, "fondo_base.mp4")
-        tiene_fondo_base = descargar_fondo_base(fondo_base_path)
-        
+        # Música de fondo
         reloj_path = os.path.join(work_dir, "reloj.mp3")
-        tiene_reloj = descargar_audio(SFX_CLOCK, reloj_path)
+        descargar_audio(SFX_CLOCK, reloj_path)
 
         music_path = os.path.join(work_dir, "music.mp3")
         if "quiz" in nicho:
@@ -137,7 +107,7 @@ def main():
         else:
             descargar_audio(MUSIC_MISTERIO, music_path)
 
-        # 3. GENERAR AUDIOS POR ESCENA
+        # Generar audios
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
@@ -145,62 +115,45 @@ def main():
             asyncio.run(gen_audio(scene["texto"], audio_path))
             
             audio_segment = AudioSegment.from_file(audio_path, format="mp3")
-            
-            # Lógica del reloj para Quizzes (si la frase termina en '?')
-            if scene["texto"].strip().endswith("?") and tiene_reloj:
-                reloj_segment = AudioSegment.from_file(reloj_path, format="mp3")[:5000] 
-                reloj_segment = reloj_segment - 10 
+            if scene["texto"].strip().endswith("?") and os.path.exists(reloj_path):
+                reloj_segment = AudioSegment.from_file(reloj_path, format="mp3")[:5000] - 10
                 audio_segment = audio_segment + reloj_segment
                 audio_segment.export(audio_path, format="mp3")
             
             audios.append(audio_path)
             duraciones.append(len(audio_segment) / 1000.0)
 
-        # 4. MEZCLAR AUDIO MAESTRO (Voz + Música)
+        # Mezclar audio
         combined = AudioSegment.empty()
         for a in audios: combined += AudioSegment.from_file(a, format="mp3")
-        
         audio_final = os.path.join(work_dir, "audio_maestro.mp3")
         if os.path.exists(music_path):
             voz_seg = combined
             musica_seg = AudioSegment.from_file(music_path, format="mp3")
             if len(musica_seg) < len(voz_seg):
-                repeticiones = (len(voz_seg) // len(musica_seg)) + 1
-                musica_seg = musica_seg * repeticiones
-            musica_seg = musica_seg[:len(voz_seg)]
-            musica_seg = musica_seg - 18 
+                musica_seg = musica_seg * ((len(voz_seg) // len(musica_seg)) + 1)
+            musica_seg = musica_seg[:len(voz_seg)] - 18
             mezcla = voz_seg.overlay(musica_seg)
             mezcla.export(audio_final, format="mp3")
         else:
             combined.export(audio_final, format="mp3")
 
-        # 5. DESCARGAR VIDEOS/IMÁGENES DE FONDO
+        # Descargar imágenes y aplicar efecto
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             dur = duraciones[i]
-            query = scene["visual"]
             
-            path = buscar_pixabay(query, work_dir, es_video=False)
+            path = buscar_pixabay(scene["visual"], work_dir)
             if path:
                 procesar_imagen_a_video(path, final_bg, dur)
                 clips.append(final_bg)
-                continue
-
-            path = buscar_pixabay(query, work_dir, es_video=True)
-            if path:
-                os.rename(path, final_bg)
-                clips.append(final_bg)
-                continue
-
-            if tiene_fondo_base:
-                shutil.copy(fondo_base_path, final_bg)
-                clips.append(final_bg)
             else:
+                # Si no hay imagen, usamos un gradiente oscuro
                 subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
                 clips.append(final_bg)
 
-        # 6. GENERAR SUBTÍTULOS (SRT)
+        # Generar Subtítulos (Estilo TikTok)
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
@@ -213,48 +166,37 @@ def main():
                 for k, bloque in enumerate(bloques):
                     start = t + (k * tiempo_por_bloque)
                     end = start + tiempo_por_bloque
-                    
                     if " A)" in bloque or " B)" in bloque:
                         bloque = bloque.replace(" A)", r"\NA)").replace(" B)", r"\NB)").replace(" C)", r"\NC)")
-                    
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # 7. ENSAMBLAR VIDEO FINAL CON FFMPEG
+        # Ensamblar video final
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
             inputs.extend(["-i", clips[i]])
             dur = duraciones[i]
-            
-            # Si el clip es el fondo base, lo ponemos en loop
-            if os.path.basename(clips[i]) == f"bg_{i}.mp4" and tiene_fondo_base and "pixabay" not in clips[i]:
-                filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,loop=-1:size=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
-            else:
-                filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
+            filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
         
-        style = "FontName=Arial,FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=150,Bold=1"
+        # Nuevo estilo: Subtítulos más grandes y centrados
+        style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
         filter_str += f"[v]subtitles={srt_path}:force_style='{style}'[vout]"
 
         final_path = os.path.join(work_dir, "final.mp4")
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_final, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
-        # 8. ENVIAR A TELEGRAM
-        nicho_usado = metadata.get("nicho_usado", "No especificado")
-        caption = f"🎬 *NEXUS STUDIO (Web)* 🎬\n\n📊 *NICHO:* {nicho_usado}\n📌 *TÍTULO:* {metadata['titulo']}\n\n📝 *DESCRIPCIÓN:*\n{metadata['descripcion']}"
-        
+        # Enviar a Telegram
+        caption = f"🎬 *NEXUS STUDIO* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}\n\n📝 *Guion generado con los nuevos parámetros.*"
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
-        
-        print("✅ Video enviado a Telegram con éxito.")
 
     except Exception as e:
-        print(f"❌ Error crítico: {e}")
-        enviar_mensaje_telegram(f"❌ *Error crítico en el renderizado:* {str(e)}")
+        enviar_mensaje_telegram(f"❌ *Error crítico:* {str(e)}")
 
 if __name__ == "__main__":
     main()
