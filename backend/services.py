@@ -20,6 +20,11 @@ def obtener_tema_aleatorio():
     return seleccion["tema"], seleccion["nicho"], seleccion["modo"]
 
 def _generar_guion_sync(tema: str, nicho: str, modo: str):
+    # Validación de seguridad
+    if not GROQ_API_KEY or not CF_AUTH_TOKEN:
+        log.error("❌ Faltan GROQ_API_KEY o CF_AUTH_TOKEN en las variables de entorno de Render.")
+        return None
+
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -50,20 +55,29 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         return None
 
 def _disparar_github_sync(escenas, metadata):
-    # Usamos repository_dispatch que es el que YA SABEMOS que funciona con tu render.yml
+    # Validación de seguridad
+    if not GITHUB_TOKEN or not GITHUB_OWNER or not GITHUB_REPO:
+        log.error("❌ Faltan GITHUB_TOKEN, GITHUB_OWNER o GITHUB_REPO en las variables de entorno de Render.")
+        return False
+
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/dispatches"
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     payload = {"event_type": "render_video", "client_payload": {"scenes": escenas, "metadata": metadata}}
+    
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
         return r.status_code == 204
-    except: return False
+    except Exception as e:
+        log.error(f"Error GitHub: {e}")
+        return False
 
 async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
     log.info(f"Iniciando generación: {tema}")
     
     data = await asyncio.to_thread(_generar_guion_sync, tema, nicho, modo)
-    if not data: return
+    if not data: 
+        log.warning("Se abortó el proceso porque no se pudo generar el guion.")
+        return
     
     escenas = data.get("escenas", [])
     metadata = {
@@ -76,5 +90,7 @@ async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
     }
     
     exito = await asyncio.to_thread(_disparar_github_sync, escenas, metadata)
-    if not exito:
-        log.error("Fallo al disparar GitHub Actions.")
+    if exito:
+        log.info("✅ Orden enviada a GitHub Actions con éxito.")
+    else:
+        log.error("❌ Fallo al disparar GitHub Actions.")
