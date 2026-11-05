@@ -37,8 +37,17 @@ async def health():
 async def generar_desde_web(request: FrontendRequest, background_tasks: BackgroundTasks):
     log.info(f"[WEB] Petición de: {request.negocio} | Tema: {request.tema}")
     
-    # Construimos un tema mucho más rico para la IA
-    tema_adaptado = f"{request.tema}. Público objetivo: {request.publico}. Puntos clave: {request.puntos_clave}. Objetivo: {request.objetivo}"
+    # Empaquetamos TODA la información del cliente
+    tema_adaptado = (
+        f"DATOS DEL CLIENTE:\n"
+        f"- Nombre del negocio: {request.negocio}\n"
+        f"- Nicho: {request.nicho}\n"
+        f"- Tono del video: {request.tono}\n"
+        f"- Tema central: {request.tema}\n"
+        f"- Público objetivo: {request.publico}\n"
+        f"- Puntos clave a mencionar obligatoriamente: {request.puntos_clave}\n"
+        f"- Objetivo del video: {request.objetivo}"
+    )
     
     background_tasks.add_task(procesar_video_async, tema_adaptado, request.nicho, "normal")
     
