@@ -40,7 +40,7 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
     REGLAS DEL TEXTO (CRÍTICO):
     - Menciona el nombre del negocio.
     - Tono: {nicho}.
-    - Genera EXACTAMENTE 25 escenas para asegurar una duración de 60 segundos o más.
+    - Genera EXACTAMENTE 25 escenas (ESTRICTAMENTE OBLIGATORIO).
     - Escena 1: Gancho de 3 segundos ultra-adictivo.
     - Escenas 2 a 20: Desarrollo del tema (entre 15 y 20 palabras por escena).
     - Escenas 21 a 25: Llamado a la acción (CTA) MUY FUERTE. Pide explícitamente dar like, comentar, compartir y suscribirse/seguir para más contenido.
@@ -66,13 +66,13 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         "messages": [{"role": "user", "content": prompt}], 
         "temperature": 0.7, 
         "response_format": {"type": "json_object"},
-        "max_tokens": 4096  # <--- AUMENTAMOS LA MEMORIA PARA 25 ESCENAS
+        "max_tokens": 8000  # <--- AUMENTADO AL MÁXIMO
     }
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=60)
         if r.status_code == 429:
-            log.warning("⚠️ Límite de Groq alcanzado. Esperando 10 segundos antes de reintentar...")
+            log.warning("⚠️ Límite de Groq alcanzado. Esperando 10 segundos...")
             time.sleep(10)
             r = requests.post(url, headers=headers, json=payload, timeout=60)
             
@@ -81,7 +81,14 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         content = content.replace("```json", "").replace("```", "").strip()
         start_idx = content.find("{")
         end_idx = content.rfind("}") + 1
-        return json.loads(content[start_idx:end_idx])
+        data = json.loads(content[start_idx:end_idx])
+        
+        # VALIDACIÓN: Si la IA fue perezosa y generó menos de 20 escenas
+        if len(data.get("escenas", [])) < 20:
+            log.warning(f"⚠️ La IA solo generó {len(data['escenas'])} escenas. Rechazando guion.")
+            return None
+            
+        return data
     except Exception as e:
         log.error(f"❌ Error Groq: {e}")
         return None
@@ -105,7 +112,7 @@ async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
     
     data = await asyncio.to_thread(_generar_guion_sync, tema, nicho, modo)
     if not data: 
-        log.warning("Se abortó el proceso porque no se pudo generar el guion.")
+        log.warning("Se abortó el proceso porque no se pudo generar un guion válido.")
         return
     
     escenas = data.get("escenas", [])
