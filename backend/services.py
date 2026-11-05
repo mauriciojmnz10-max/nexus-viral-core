@@ -55,7 +55,6 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         return None
 
 def _disparar_github_sync(escenas, metadata):
-    # Validación de seguridad
     if not GITHUB_TOKEN or not GITHUB_OWNER or not GITHUB_REPO:
         log.error("❌ Faltan GITHUB_TOKEN, GITHUB_OWNER o GITHUB_REPO en las variables de entorno de Render.")
         return False
@@ -66,9 +65,14 @@ def _disparar_github_sync(escenas, metadata):
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        return r.status_code == 204
+        if r.status_code == 204:
+            return True
+        else:
+            # ESTO NOS DIRÁ EL ERROR EXACTO DE GITHUB
+            log.error(f"❌ GitHub rechazó la orden. Status: {r.status_code}. Respuesta: {r.text}")
+            return False
     except Exception as e:
-        log.error(f"Error GitHub: {e}")
+        log.error(f"❌ Error de red al conectar con GitHub: {e}")
         return False
 
 async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
