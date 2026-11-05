@@ -12,10 +12,11 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
-# Música y SFX
+# Música y SFX (Whoosh para transiciones)
 MUSIC_MISTERIO = "https://assets.mixkit.co/music/preview/mixkit-mysterious-dark-and-mysterious-ambient-1005.mp3"
 MUSIC_FINANZAS = "https://assets.mixkit.co/music/preview/mixkit-modern-logo-3-1191.mp3"
 MUSIC_QUIZ = "https://assets.mixkit.co/music/preview/mixkit-game-level-3-2076.mp3"
+SFX_WHOOSH = "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"
 SFX_CLOCK = "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"
 
 def enviar_mensaje_telegram(texto):
@@ -35,12 +36,10 @@ def descargar_audio(url, output):
     return False
 
 def buscar_pixabay(query, output_dir, es_video=True):
-    """Busca videos de alta calidad o imágenes si no hay video."""
     try:
         url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
-        # Usamos solo las primeras 2 palabras de la query para asegurar resultados
-        query_corta = " ".join(query.split()[:3]) 
-        params = {"key": PIXABAY_API_KEY, "q": query_corta, "per_page": 5, "orientation": "vertical", "safesearch": "true"}
+        query_corta = " ".join(query.split()[:3]) # Usamos las primeras 3 palabras
+        params = {"key": PIXABAY_API_KEY, "q": query_corta, "per_page": 3, "orientation": "vertical", "safesearch": "true"}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
             hits = r.json().get("hits", [])
@@ -63,7 +62,6 @@ def buscar_pixabay(query, output_dir, es_video=True):
     return None, False
 
 def procesar_imagen_a_video(img_path, output_video, duracion):
-    """Convierte imagen en video con zoom (Ken Burns) si no hay video de Pixabay."""
     try:
         temp_mp4 = output_video.replace(".mp4", "_temp.mp4")
         cmd_convert = ["ffmpeg", "-y", "-loop", "1", "-i", img_path, "-t", "1", "-vf", "scale=800:1422,format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast", temp_mp4]
@@ -73,12 +71,10 @@ def procesar_imagen_a_video(img_path, output_video, duracion):
         subprocess.run(cmd_zoom, check=True, capture_output=True)
         if os.path.exists(temp_mp4): os.remove(temp_mp4)
         return True
-    except Exception as e:
-        print(f"[ERROR IMAGEN] {e}")
-        return False
+    except: return False
 
 async def gen_audio(texto, output):
-    # Voz natural sin aceleración forzada
+    # Voz Natural (sin aceleración)
     voice = "es-MX-JorgeNeural" 
     try:
         communicate = edge_tts.Communicate(texto, voice)
@@ -101,13 +97,16 @@ def main():
     nicho = metadata.get("nicho_usado", "").lower()
 
     try:
-        # Música
+        # 1. Descargar Assets Base
+        whoosh_path = os.path.join(work_dir, "whoosh.mp3")
+        descargar_audio(SFX_WHOOSH, whoosh_path)
+        
         music_path = os.path.join(work_dir, "music.mp3")
         if "quiz" in nicho: descargar_audio(MUSIC_QUIZ, music_path)
         elif "finanzas" in nicho or "tecnologia" in nicho: descargar_audio(MUSIC_FINANZAS, music_path)
         else: descargar_audio(MUSIC_MISTERIO, music_path)
 
-        # Audios
+        # 2. Generar Audios
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
@@ -117,53 +116,61 @@ def main():
             audios.append(audio_path)
             duraciones.append(len(audio_segment) / 1000.0)
 
+        # 3. Mezclar Audio (Voz + Música + Efectos)
         combined = AudioSegment.empty()
-        for a in audios: combined += AudioSegment.from_file(a, format="mp3")
+        for idx, a in enumerate(audios): 
+            audio_seg = AudioSegment.from_file(a, format="mp3")
+            # Añadir Whoosh al inicio de cada escena
+            if os.path.exists(whoosh_path):
+                whoosh = AudioSegment.from_file(whoosh_path, format="mp3")[:1000] - 15 # Volumen bajo
+                audio_seg = whoosh + audio_seg
+            combined += audio_seg
+            
         audio_final = os.path.join(work_dir, "audio_maestro.mp3")
+        
+        # Audio Ducking simple: Música al 15%
         if os.path.exists(music_path):
-            voz_seg = combined
             musica_seg = AudioSegment.from_file(music_path, format="mp3")
-            if len(musica_seg) < len(voz_seg):
-                musica_seg = musica_seg * ((len(voz_seg) // len(musica_seg)) + 1)
-            musica_seg = musica_seg[:len(voz_seg)] - 18
-            mezcla = voz_seg.overlay(musica_seg)
+            if len(musica_seg) < len(combined):
+                musica_seg = musica_seg * ((len(combined) // len(musica_seg)) + 1)
+            musica_seg = musica_seg[:len(combined)] - 18
+            mezcla = combined.overlay(musica_seg)
             mezcla.export(audio_final, format="mp3")
         else:
             combined.export(audio_final, format="mp3")
 
-        # Clips (Videos primero, luego imágenes)
+        # 4. Buscar Clips de Video (Prioridad) o Imágenes
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             dur = duraciones[i]
             query = scene["visual"]
             
-            # 1. Intentar Video
+            # Intentar Video
             path, es_video = buscar_pixabay(query, work_dir, es_video=True)
             if es_video and path:
-                # Recortar el video a la duración exacta
-                cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
+                cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.1:saturation=1.2", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
                 subprocess.run(cmd, check=True, capture_output=True)
                 clips.append(final_bg)
                 continue
 
-            # 2. Si no hay video, buscar Imagen
+            # Si no hay video, buscar Imagen
             path, es_video = buscar_pixabay(query, work_dir, es_video=False)
             if path:
                 procesar_imagen_a_video(path, final_bg, dur)
                 clips.append(final_bg)
                 continue
 
-            # 3. Si todo falla, gradiente oscuro
+            # Gradiente
             subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             clips.append(final_bg)
 
-        # Subtítulos
+        # 5. Subtítulos
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
             for i, scene in enumerate(scenes):
-                dur = duraciones[i]
+                dur = duraciones[i] + (1.0 if os.path.exists(whoosh_path) else 0.0) # Ajuste por el whoosh
                 palabras = scene['texto'].split()
                 bloques = [" ".join(palabras[j:j+4]) for j in range(0, len(palabras), 4)]
                 tiempo_por_bloque = dur / len(bloques) if bloques else dur
@@ -173,7 +180,7 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # Ensamblar final
+        # 6. Ensamblar Final
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -183,6 +190,8 @@ def main():
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
+        
+        # Estilo TikTok
         style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
         filter_str += f"[v]subtitles={srt_path}:force_style='{style}'[vout]"
 
@@ -190,7 +199,8 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-i", audio_final, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{len(scenes)}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
-        caption = f"🎬 *NEXUS STUDIO* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}"
+        # Enviar a Telegram
+        caption = f"🎬 *NEXUS STUDIO (CINE)* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}"
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
 
