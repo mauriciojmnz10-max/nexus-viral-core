@@ -3,8 +3,10 @@ import random
 import json
 import requests
 import asyncio
-from config import GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, TEMAS_POOL
-from llm_router import llm_router
+from config import (
+    GROQ_API_KEY, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO,
+    CF_ACCOUNT_ID, CF_GATEWAY_ID, CF_AUTH_TOKEN, TEMAS_POOL
+)
 
 log = logging.getLogger("nexus.services")
 COLA_TEMAS = []
@@ -17,9 +19,68 @@ def obtener_tema_aleatorio():
     seleccion = COLA_TEMAS.pop(0)
     return seleccion["tema"], seleccion["nicho"], seleccion["modo"]
 
+def _generar_guion_sync(tema: str, nicho: str, modo: str):
+    if not GROQ_API_KEY or not CF_AUTH_TOKEN:
+        log.error("❌ Faltan GROQ_API_KEY o CF_AUTH_TOKEN.")
+        return None
+
+    url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "cf-aig-authorization": f"Bearer {CF_AUTH_TOKEN}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
+    
+    prompt = f"""
+    Actúa como un Director de Cine y Guionista Viral Senior.
+    Genera un guion de 12 escenas sobre: '{tema}' (Nicho: {nicho}).
+    
+    REGLAS DEL TEXTO:
+    - Gancho de 3 segundos ultra-adictivo.
+    - Frases cortas, directas, con comas.
+    - Máximo 15 palabras por escena.
+
+    REGLAS VISUALES (CRÍTICO):
+    Para el campo "visual", escribe una DESCRIPCIÓN DETALLADA EN INGLÉS (mínimo 5 palabras) que describa una escena cinematográfica.
+    Ejemplo: "Close-up of a delicious melted cheese sandwich, 4k, cinematic lighting" o "A stressed person looking at a credit card bill, dramatic lighting".
+    NO uses palabras sueltas.
+    
+    Devuelve SOLO un JSON válido con esta estructura exacta:
+    {{
+        "plataforma": "YouTube",
+        "titulo": "Título adictivo",
+        "descripcion": "Descripción persuasiva",
+        "hashtags": "#tag1 #tag2 #tag3",
+        "cta_link": "CTA",
+        "escenas": [
+            {{"texto": "Texto de la escena", "visual": "Detailed english prompt for cinematic video"}}
+        ]
+    }}
+    """
+    
+    payload = {
+        "model": "openai/gpt-oss-120b", 
+        "messages": [{"role": "user", "content": prompt}], 
+        "temperature": 0.7, 
+        "response_format": {"type": "json_object"}
+    }
+    
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=45)
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        content = content.replace("```json", "").replace("```", "").strip()
+        start_idx = content.find("{")
+        end_idx = content.rfind("}") + 1
+        return json.loads(content[start_idx:end_idx])
+    except Exception as e:
+        log.error(f"❌ Error Groq: {e}")
+        return None
+
 def _disparar_github_sync(escenas, metadata):
     if not GITHUB_TOKEN or not GITHUB_OWNER or not GITHUB_REPO:
-        log.error("❌ Faltan GITHUB_TOKEN, GITHUB_OWNER o GITHUB_REPO.")
+        log.error("❌ Faltan variables de GitHub.")
         return False
 
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/dispatches"
@@ -28,22 +89,16 @@ def _disparar_github_sync(escenas, metadata):
     
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 204:
-            return True
-        else:
-            log.error(f"❌ GitHub rechazó la orden. Status: {r.status_code}. Respuesta: {r.text}")
-            return False
+        return r.status_code == 204
     except Exception as e:
-        log.error(f"❌ Error de red al conectar con GitHub: {e}")
+        log.error(f"❌ Error GitHub: {e}")
         return False
 
 async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
-    log.info(f"Iniciando generación con Multi-IA: {tema}")
+    log.info(f"Iniciando generación (Modo Cine): {tema}")
     
-    # Usamos el nuevo enrutador de IAs
-    data = await llm_router.generar_guion_completo(tema, nicho)
-    
-    if not data or not data.get("escenas"): 
+    data = await asyncio.to_thread(_generar_guion_sync, tema, nicho, modo)
+    if not data: 
         log.warning("Se abortó el proceso porque no se pudo generar el guion.")
         return
     
