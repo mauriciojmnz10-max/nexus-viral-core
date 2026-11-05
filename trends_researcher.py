@@ -2,33 +2,34 @@ import os
 import requests
 import logging
 import json
-import xml.etree.ElementTree as ET
-from config import GROQ_API_KEY, CF_ACCOUNT_ID, CF_GATEWAY_ID, CF_AUTH_TOKEN, TEMAS_POOL
 import random
+from config import GROQ_API_KEY, CF_ACCOUNT_ID, CF_GATEWAY_ID, CF_AUTH_TOKEN, TEMAS_POOL
 
 log = logging.getLogger("nexus.trends")
 
-# URL del RSS de noticias de Google (Español - Latinoamérica)
-RSS_URL = "https://news.google.com/rss?hl=es-419&gl=US&ceid=US:es-419"
+# Nichos para rotar si falla la investigación
+NICHOS_ROTACION = ["finanzas", "tecnologia", "salud", "belleza", "comida", "legal", "motivacion"]
 
 def _obtener_noticias_rss() -> list:
     """Extrae los títulos de las noticias más recientes del RSS de Google."""
     noticias = []
     try:
-        r = requests.get(RSS_URL, timeout=10)
+        # Usamos el RSS de Google News en español
+        r = requests.get("https://news.google.com/rss?hl=es-419&gl=US&ceid=US:es-419", timeout=10)
         if r.status_code == 200:
+            import xml.etree.ElementTree as ET
             root = ET.fromstring(r.content)
             for item in root.findall(".//item"):
                 title = item.find("title").text
                 if title:
                     noticias.append(title)
-        return noticias[:20] # Solo las top 20
+        return noticias[:20]
     except Exception as e:
         log.error(f"Error leyendo RSS: {e}")
         return []
 
 def _filtrar_con_groq(noticias: list, nicho: str) -> list:
-    """Usa Groq para elegir las 3 noticias con más potencial viral y adaptarlas al nicho."""
+    """Usa Groq para elegir las 3 noticias con más potencial viral."""
     if not noticias:
         return []
 
@@ -40,7 +41,6 @@ def _filtrar_con_groq(noticias: list, nicho: str) -> list:
         "User-Agent": "Mozilla/5.0"
     }
     
-    # Convertimos la lista a un texto para la IA
     noticias_texto = "\n".join([f"- {n}" for n in noticias])
     
     prompt = f"""
@@ -64,7 +64,7 @@ def _filtrar_con_groq(noticias: list, nicho: str) -> list:
     payload = {
         "model": "openai/gpt-oss-120b",
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
+        "temperature": 0.9, # Subimos la temperatura para más variedad
         "response_format": {"type": "json_object"}
     }
     
@@ -81,7 +81,7 @@ def _filtrar_con_groq(noticias: list, nicho: str) -> list:
 
 def obtener_temas_autonomos(nicho_deseado: str = "general") -> list:
     """
-    Función maestra. Intenta obtener tendencias reales. Si falla, usa el pool de respaldo.
+    Intenta obtener tendencias reales. Si falla, rota nichos para garantizar variedad.
     """
     log.info(f"🔍 Buscando tendencias virales para el nicho: {nicho_deseado}")
     
@@ -91,17 +91,25 @@ def obtener_temas_autonomos(nicho_deseado: str = "general") -> list:
         temas_ia = _filtrar_con_groq(noticias, nicho_deseado)
         if temas_ia and len(temas_ia) > 0:
             log.info(f"✅ Tendencias encontradas y filtradas por IA: {len(temas_ia)}")
-            # Aseguramos que tengan el modo "normal"
             for t in temas_ia:
                 t["modo"] = "normal"
             return temas_ia
 
-    # --- PLAN DE RESPALDO (Si falla Google o Groq) ---
-    log.warning("⚠️ Fallo la investigación de tendencias. Usando el Pool de respaldo.")
-    # Filtramos el pool original por el nicho si es posible, o tomamos 3 al azar
-    pool_filtrado = [t for t in TEMAS_POOL if nicho_deseado.lower() in t["nicho"].lower()]
+    # --- PLAN DE RESPALDO (Rotación de Nichos) ---
+    log.warning("⚠️ Fallo la investigación. Usando rotación de nichos para garantizar variedad.")
+    
+    # Elegimos un nicho aleatorio y buscamos en el pool
+    nicho_aleatorio = random.choice(NICHOS_ROTACION)
+    pool_filtrado = [t for t in TEMAS_POOL if nicho_aleatorio.lower() in t["nicho"].lower()]
+    
     if not pool_filtrado:
         pool_filtrado = TEMAS_POOL.copy()
     
     random.shuffle(pool_filtrado)
-    return pool_filtrado[:3]
+    temas_finales = pool_filtrado[:3]
+    
+    # Aseguramos que tengan la estructura correcta
+    for t in temas_finales:
+        t["modo"] = t.get("modo", "normal")
+        
+    return temas_finales
