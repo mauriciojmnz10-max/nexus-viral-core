@@ -36,7 +36,6 @@ def descargar_audio(url, output):
 def buscar_pixabay(query, output_dir, es_video=True):
     try:
         url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
-        # Si la query tiene espacios, tomamos solo la primera palabra
         query_limpia = query.split()[0] if query else "abstract"
         
         params = {"key": PIXABAY_API_KEY, "q": query_limpia, "per_page": 3, "orientation": "vertical", "safesearch": "true"}
@@ -74,8 +73,6 @@ def procesar_imagen_a_video(img_path, output_video, duracion):
     except: return False
 
 async def gen_audio(texto, output):
-    # Voz de España (Álvaro) - Es la más natural de Edge-TTS
-    # Pitch +2Hz para evitar que suene plana
     voice = "es-ES-AlvaroNeural" 
     try:
         communicate = edge_tts.Communicate(texto, voice, pitch="+2Hz")
@@ -136,14 +133,13 @@ def main():
         else:
             combined.export(audio_final, format="mp3")
 
-        # 4. Clips (Lógica mejorada)
+        # 4. Clips
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             dur = duraciones[i]
             query = scene["visual"]
             
-            # Intentar video
             path, es_video = buscar_pixabay(query, work_dir, es_video=True)
             if es_video and path:
                 cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
@@ -151,14 +147,12 @@ def main():
                 clips.append(final_bg)
                 continue
 
-            # Intentar imagen
             path, es_video = buscar_pixabay(query, work_dir, es_video=False)
             if path:
                 procesar_imagen_a_video(path, final_bg, dur)
                 clips.append(final_bg)
                 continue
 
-            # Si falla, buscar un clip genérico relacionado con el nicho
             path, es_video = buscar_pixabay(nicho, work_dir, es_video=True)
             if es_video and path:
                 cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
@@ -166,7 +160,6 @@ def main():
                 clips.append(final_bg)
                 continue
 
-            # Último recurso: Gradiente
             subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             clips.append(final_bg)
 
@@ -185,7 +178,7 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # 6. Ensamblar Video Final con Transiciones Suaves (Crossfade)
+        # 6. Ensamblar Video Final (CORTE LIMPIO SIN XFADE)
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -193,29 +186,15 @@ def main():
             dur = duraciones[i]
             filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
-        # Añadimos el audio
         inputs.extend(["-i", audio_final])
         audio_index = len(scenes)
 
-        # Creamos las transiciones (Crossfade) entre clips
-        if len(scenes) > 1:
-            # Si hay más de 1 clip, hacemos un xfade (cruce)
-            last_output = "v0"
-            current_offset = 0.0
-            for i in range(1, len(scenes)):
-                dur_prev = duraciones[i-1]
-                current_offset += (dur_prev - 0.3) # 0.3s de transición
-                out_name = f"vx{i}"
-                filter_str += f"[{last_output}][v{i}]xfade=transition=fade:duration=0.3:offset={current_offset}[{out_name}];"
-                last_output = out_name
-            
-            # Aplicamos subtítulos al último video
-            style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
-            filter_str += f"[{last_output}]subtitles={srt_path}:force_style='{style}'[vout]"
-        else:
-            # Si solo hay 1 clip, no hacemos transición
-            style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
-            filter_str += f"[v0]subtitles={srt_path}:force_style='{style}'[vout]"
+        # Concatenación simple (Cero cortes en el audio)
+        concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
+        filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
+        
+        style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
+        filter_str += f"[v]subtitles={srt_path}:force_style='{style}'[vout]"
 
         final_path = os.path.join(work_dir, "final.mp4")
         cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{audio_index}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
