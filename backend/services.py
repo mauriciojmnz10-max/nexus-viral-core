@@ -21,7 +21,7 @@ def obtener_tema_aleatorio():
 
 def _generar_guion_sync(tema: str, nicho: str, modo: str):
     if not GROQ_API_KEY or not CF_AUTH_TOKEN:
-        log.error("❌ Faltan GROQ_API_KEY o CF_AUTH_TOKEN.")
+        log.error("❌ Faltan credenciales de Groq.")
         return None
 
     url = f"https://gateway.ai.cloudflare.com/v1/{CF_ACCOUNT_ID}/{CF_GATEWAY_ID}/groq/chat/completions"
@@ -34,17 +34,21 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
     
     prompt = f"""
     Actúa como un Director de Cine y Guionista Viral Senior.
-    Genera un guion de 12 escenas sobre: '{tema}' (Nicho: {nicho}).
+    Aquí tienes los datos del cliente:
+    {tema}
     
-    REGLAS DEL TEXTO:
+    REGLAS DEL TEXTO (CRÍTICO):
+    - El guion DEBE mencionar el "Nombre del negocio".
+    - El tono DEBE ser exactamente el solicitado.
+    - Debes incluir TODOS los "Puntos clave a mencionar".
     - Gancho de 3 segundos ultra-adictivo.
     - Frases cortas, directas, con comas.
     - Máximo 15 palabras por escena.
 
     REGLAS VISUALES (CRÍTICO):
-    Para el campo "visual", escribe una DESCRIPCIÓN DETALLADA EN INGLÉS (mínimo 5 palabras) que describa una escena cinematográfica.
-    Ejemplo: "Close-up of a delicious melted cheese sandwich, 4k, cinematic lighting" o "A stressed person looking at a credit card bill, dramatic lighting".
-    NO uses palabras sueltas.
+    Para el campo "visual", escribe EXACTAMENTE 2 PALABRAS EN INGLÉS que representen objetos físicos y concretos.
+    Ejemplo: "melted cheese", "barber scissors", "money cash", "fitness gym".
+    NO uses frases largas ni conceptos abstractos.
     
     Devuelve SOLO un JSON válido con esta estructura exacta:
     {{
@@ -54,7 +58,7 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
         "hashtags": "#tag1 #tag2 #tag3",
         "cta_link": "CTA",
         "escenas": [
-            {{"texto": "Texto de la escena", "visual": "Detailed english prompt for cinematic video"}}
+            {{"texto": "Texto de la escena", "visual": "keyword1 keyword2"}}
         ]
     }}
     """
@@ -90,12 +94,10 @@ def _disparar_github_sync(escenas, metadata):
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=15)
         return r.status_code == 204
-    except Exception as e:
-        log.error(f"❌ Error GitHub: {e}")
-        return False
+    except: return False
 
 async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
-    log.info(f"Iniciando generación (Modo Cine): {tema}")
+    log.info(f"Iniciando generación: {tema[:50]}...")
     
     data = await asyncio.to_thread(_generar_guion_sync, tema, nicho, modo)
     if not data: 
@@ -113,7 +115,5 @@ async def procesar_video_async(tema: str, nicho: str, modo: str = "normal"):
     }
     
     exito = await asyncio.to_thread(_disparar_github_sync, escenas, metadata)
-    if exito:
-        log.info("✅ Orden enviada a GitHub Actions con éxito.")
-    else:
-        log.error("❌ Fallo al disparar GitHub Actions.")
+    if exito: log.info("✅ Orden enviada a GitHub Actions.")
+    else: log.error("❌ Fallo al disparar GitHub Actions.")
