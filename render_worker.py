@@ -12,6 +12,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
 
+# Música y Efectos de Sonido
 MUSIC_MISTERIO = "https://assets.mixkit.co/music/preview/mixkit-mysterious-dark-and-mysterious-ambient-1005.mp3"
 MUSIC_FINANZAS = "https://assets.mixkit.co/music/preview/mixkit-modern-logo-3-1191.mp3"
 MUSIC_QUIZ = "https://assets.mixkit.co/music/preview/mixkit-game-level-3-2076.mp3"
@@ -71,10 +72,10 @@ def procesar_imagen_a_video(img_path, output_video, duracion):
     except: return False
 
 async def gen_audio(texto, output):
-    # Voz más natural
-    voice = "es-US-AlonsoNeural" 
+    # Voz Natural (Dalia) con ritmo pausado (-5%) para que suene humana
+    voice = "es-MX-DaliaNeural" 
     try:
-        communicate = edge_tts.Communicate(texto, voice)
+        communicate = edge_tts.Communicate(texto, voice, rate="-5%")
         await asyncio.wait_for(communicate.save(output), timeout=20)
     except Exception as e:
         raise Exception(f"Edge-TTS falló: {e}")
@@ -86,14 +87,16 @@ def main():
     scenes_json = os.getenv("SCENES_JSON")
     metadata_json = os.getenv("METADATA_JSON")
 
-    if not scenes_json or scenes_json == "null": return
+    if not scenes_json or scenes_json == "null": 
+        print("No hay escenas para procesar.")
+        return
 
     scenes = json.loads(scenes_json)
     metadata = json.loads(metadata_json)
     nicho = metadata.get("nicho_usado", "").lower()
 
     try:
-        # 1. Assets Base
+        # 1. Descargar Assets Base (Música y Efectos)
         whoosh_path = os.path.join(work_dir, "whoosh.mp3")
         descargar_audio(SFX_WHOOSH, whoosh_path)
         
@@ -102,7 +105,7 @@ def main():
         elif "finanzas" in nicho or "tecnologia" in nicho: descargar_audio(MUSIC_FINANZAS, music_path)
         else: descargar_audio(MUSIC_MISTERIO, music_path)
 
-        # 2. Audios por escena
+        # 2. Generar Audios con la nueva voz
         audios = []
         duraciones = []
         for i, scene in enumerate(scenes):
@@ -112,11 +115,12 @@ def main():
             audios.append(audio_path)
             duraciones.append(len(audio_segment) / 1000.0)
 
-        # 3. Mezclar Audio (Voz + Música + SFX)
+        # 3. Mezclar Audio (Voz + Whoosh + Música de fondo)
         combined = AudioSegment.empty()
         for idx, a in enumerate(audios): 
             audio_seg = AudioSegment.from_file(a, format="mp3")
             if os.path.exists(whoosh_path):
+                # Añadimos el efecto Whoosh al inicio de cada escena
                 whoosh = AudioSegment.from_file(whoosh_path, format="mp3")[:1000] - 15 
                 audio_seg = whoosh + audio_seg
             combined += audio_seg
@@ -126,13 +130,13 @@ def main():
             musica_seg = AudioSegment.from_file(music_path, format="mp3")
             if len(musica_seg) < len(combined):
                 musica_seg = musica_seg * ((len(combined) // len(musica_seg)) + 1)
-            musica_seg = musica_seg[:len(combined)] - 20  # Volumen de música bajo
+            musica_seg = musica_seg[:len(combined)] - 20  # Volumen bajo para que no tape la voz
             mezcla = combined.overlay(musica_seg)
             mezcla.export(audio_final, format="mp3")
         else:
             combined.export(audio_final, format="mp3")
 
-        # 4. Clips de Video
+        # 4. Buscar Clips (Videos primero, Imágenes después)
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
@@ -141,6 +145,7 @@ def main():
             
             path, es_video = buscar_pixabay(query, work_dir, es_video=True)
             if es_video and path:
+                # Filtro cinematográfico (más contraste y saturación)
                 cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
                 subprocess.run(cmd, check=True, capture_output=True)
                 clips.append(final_bg)
@@ -152,10 +157,11 @@ def main():
                 clips.append(final_bg)
                 continue
 
+            # Si no hay nada, fondo negro
             subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             clips.append(final_bg)
 
-        # 5. Subtítulos
+        # 5. Generar Subtítulos dinámicos
         srt_path = os.path.join(work_dir, "subs.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             t = 0.0
@@ -170,7 +176,7 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # 6. Ensamblar Final (MAPEO DE AUDIO CORREGIDO)
+        # 6. Ensamblar Video Final
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -178,13 +184,14 @@ def main():
             dur = duraciones[i]
             filter_str += f"[{i}:v]scale=480:854:force_original_aspect_ratio=increase,crop=480:854,fps=30,setsar=1,trim=duration={dur},setpts=PTS-STARTPTS[v{i}];"
 
-        # Añadimos el audio mezclado
+        # Añadimos el audio maestro (el que tiene la música y el whoosh)
         inputs.extend(["-i", audio_final])
         audio_index = len(scenes)
 
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
         
+        # Estilo de subtítulos grandes
         style = "FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=200,Bold=1"
         filter_str += f"[v]subtitles={srt_path}:force_style='{style}'[vout]"
 
@@ -192,9 +199,12 @@ def main():
         cmd = ["ffmpeg", "-y", *inputs, "-filter_complex", filter_str, "-map", "[vout]", "-map", f"{audio_index}:a", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", final_path]
         subprocess.run(cmd, check=True, capture_output=True)
 
+        # 7. Enviar a Telegram
         caption = f"🎬 *NEXUS STUDIO (CINE)* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}"
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
+        
+        print("✅ Video enviado con éxito.")
 
     except Exception as e:
         enviar_mensaje_telegram(f"❌ *Error crítico:* {str(e)}")
