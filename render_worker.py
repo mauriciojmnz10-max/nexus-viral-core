@@ -7,6 +7,8 @@ import asyncio
 import edge_tts
 from pydub import AudioSegment
 import shutil
+# IMPORTAMOS EL NUEVO MOTOR
+from visual_engine import obtener_clip_visual
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -37,7 +39,6 @@ def buscar_pixabay(query, output_dir, es_video=True):
     try:
         url = "https://pixabay.com/api/videos/" if es_video else "https://pixabay.com/api/"
         query_limpia = query.split()[0] if query else "abstract"
-        
         params = {"key": PIXABAY_API_KEY, "q": query_limpia, "per_page": 3, "orientation": "vertical", "safesearch": "true"}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
@@ -133,13 +134,26 @@ def main():
         else:
             combined.export(audio_final, format="mp3")
 
-        # 4. Clips
+        # 4. Clips (Motor Híbrido: IA -> Pixabay)
         clips = []
         for i, scene in enumerate(scenes):
             final_bg = os.path.join(work_dir, f"bg_{i}.mp4")
             dur = duraciones[i]
             query = scene["visual"]
             
+            # INTENTO 1: Motor Visual IA (Prezzy / Pollinations)
+            ai_clip, tipo = obtener_clip_visual(query, work_dir, dur)
+            if ai_clip:
+                # Si es imagen IA, ya viene con zoom aplicado. Si es video, lo recortamos.
+                if tipo == "video_ia":
+                    cmd = ["ffmpeg", "-y", "-i", ai_clip, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
+                    subprocess.run(cmd, check=True, capture_output=True)
+                else:
+                    os.rename(ai_clip, final_bg)
+                clips.append(final_bg)
+                continue
+
+            # INTENTO 2: Pixabay Video
             path, es_video = buscar_pixabay(query, work_dir, es_video=True)
             if es_video and path:
                 cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
@@ -147,19 +161,14 @@ def main():
                 clips.append(final_bg)
                 continue
 
+            # INTENTO 3: Pixabay Imagen
             path, es_video = buscar_pixabay(query, work_dir, es_video=False)
             if path:
                 procesar_imagen_a_video(path, final_bg, dur)
                 clips.append(final_bg)
                 continue
 
-            path, es_video = buscar_pixabay(nicho, work_dir, es_video=True)
-            if es_video and path:
-                cmd = ["ffmpeg", "-y", "-i", path, "-t", str(dur), "-vf", "scale=480:854:force_original_aspect_ratio=increase,crop=480:854,eq=contrast=1.2:saturation=1.3", "-c:v", "libx264", "-preset", "ultrafast", final_bg]
-                subprocess.run(cmd, check=True, capture_output=True)
-                clips.append(final_bg)
-                continue
-
+            # Último recurso: Gradiente
             subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "gradients=s=480x854:c0=0x1a1a2e:c1=0x000000:d=10", "-c:v", "libx264", "-preset", "ultrafast", "-t", "10", final_bg], check=True, capture_output=True)
             clips.append(final_bg)
 
@@ -178,7 +187,7 @@ def main():
                     f.write(f"{i}_{k}\n00:00:{int(start):02},{int((start%1)*1000):03} --> 00:00:{int(end):02},{int(((end)%1)*1000):03}\n{bloque}\n\n")
                 t += dur
 
-        # 6. Ensamblar Video Final (CORTE LIMPIO SIN XFADE)
+        # 6. Ensamblar Video Final
         inputs = []
         filter_str = ""
         for i in range(len(scenes)):
@@ -189,7 +198,6 @@ def main():
         inputs.extend(["-i", audio_final])
         audio_index = len(scenes)
 
-        # Concatenación simple (Cero cortes en el audio)
         concat_inputs = "".join([f"[v{i}]" for i in range(len(scenes))])
         filter_str += f"{concat_inputs}concat=n={len(scenes)}:v=1:a=0[v];"
         
@@ -201,12 +209,12 @@ def main():
         subprocess.run(cmd, check=True, capture_output=True)
 
         # 7. Enviar a Telegram
-        caption = f"🎬 *NEXUS STUDIO (CINE)* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}"
+        caption = f"🎬 *NEXUS STUDIO (IA VISUAL)* 🎬\n\n📌 *Título:* {metadata['titulo']}\n📊 *Nicho:* {nicho}"
         with open(final_path, "rb") as video:
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}, files={"video": video}, timeout=120)
 
     except Exception as e:
-        enviar_mensaje_telegram(f"❌ *Error crítico:* {str(e)}")
+        enviar_mensaje_telegram(f"❌ *Error crítico:* {e}")
 
 if __name__ == "__main__":
     main()
