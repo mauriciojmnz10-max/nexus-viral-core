@@ -1,19 +1,47 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "../index.css";
+
+// Diccionario de Placeholders dinámicos por Nicho
+const PLACEHOLDERS = {
+  "Comida": { tema: "El mejor pan de queso de la ciudad", publico: "Adultos amantes de la comida artesanal", puntos: "Crocante por fuera, blando por dentro" },
+  "Belleza": { tema: "El error que cometen todos al pedir un corte de pelo", publico: "Hombres jóvenes de 18 a 30 años", puntos: "Estilo moderno, fácil de peinar en casa" },
+  "Tecnología": { tema: "El truco de privacidad que WhatsApp oculta", publico: "Usuarios de smartphone", puntos: "Configuración rápida, seguridad total" },
+  "Finanzas": { tema: "Cómo ahorrar sin darte cuenta", publico: "Familias y jóvenes profesionales", puntos: "Método fácil, resultados en 30 días" },
+  "Salud": { tema: "El hábito nocturno que destruye tu energía", publico: "Personas con estrés o insomnio", puntos: "Rutina de 5 minutos, mejora el sueño" },
+  "Legal": { tema: "Tus derechos si te detiene la policía", publico: "Ciudadanos en general", puntos: "Explicación clara, pasos a seguir" },
+  "Educación": { tema: "La técnica de estudio de la NASA", publico: "Estudiantes universitarios", puntos: "Fácil de aplicar, mejora la memoria" },
+  "Fitness": { tema: "El ejercicio de 3 minutos para quemar grasa", publico: "Personas con poco tiempo", puntos: "Sin equipo, en casa, resultados rápidos" },
+  "Inmobiliaria": { tema: "El error al comprar tu primera casa", publico: "Compradores primerizos", puntos: "Revisar papeles, evitar estafas" },
+  "Mascotas": { tema: "La comida que mata a tu perro lentamente", publico: "Dueños de perros", puntos: "Lista de ingredientes, alternativas saludables" },
+  "Viajes": { tema: "El secreto para viajar barato que las aerolíneas ocultan", publico: "Mochileros y viajeros frecuentes", puntos: "Fechas clave, trucos de reserva" },
+  "Moda": { tema: "La regla de oro para combinar colores", publico: "Hombres y mujeres que quieren verse bien", puntos: "Fácil, aplicable con ropa básica" },
+};
+
+const NICHOS = Object.keys(PLACEHOLDERS);
+const TONOS = ["Divertido", "Serio", "Misterioso", "Educativo", "Inspirador", "Urgente", "Profesional", "Relajado"];
 
 export default function App() {
   const [form, setForm] = useState({ 
     negocio: "", 
-    nicho: "Belleza", 
+    nicho: "Comida", 
     tono: "Divertido", 
     tema: "",
     publico: "",
     puntos_clave: "",
     objetivo: "Vender"
   });
+  
+  const [placeholders, setPlaceholders] = useState(PLACEHOLDERS["Comida"]);
   const [loading, setLoading] = useState(false);
   const [video, setVideo] = useState(null);
   const [error, setError] = useState("");
+
+  // Actualizar placeholders cuando cambia el nicho
+  useEffect(() => {
+    if (PLACEHOLDERS[form.nicho]) {
+      setPlaceholders(PLACEHOLDERS[form.nicho]);
+    }
+  }, [form.nicho]);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -51,48 +79,52 @@ export default function App() {
         <p className="text-sm text-slate-400 mt-2">Generador de contenido viral de alta calidad</p>
       </header>
 
-      <main className="glass w-full max-w-md p-6 rounded-2xl">
+      <main className="glass w-full max-w-lg p-6 rounded-2xl">
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          
           <div>
             <label className="text-xs font-semibold text-slate-400">Nombre del Negocio</label>
-            <input type="text" name="negocio" required value={form.negocio} onChange={handleChange} className="input mt-1" placeholder="Ej. Peluquería Juan" />
+            <input type="text" name="negocio" required value={form.negocio} onChange={handleChange} className="input mt-1" placeholder={`Ej. ${form.nicho === 'Comida' ? 'Panadería Cucu' : 'Mi Negocio'}`} />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs font-semibold text-slate-400">Nicho</label>
               <select name="nicho" value={form.nicho} onChange={handleChange} className="input mt-1">
-                <option value="Belleza">Belleza</option>
-                <option value="Comida">Comida</option>
-                <option value="Tecnología">Tecnología</option>
-                <option value="Finanzas">Finanzas</option>
-                <option value="Salud">Salud</option>
+                {NICHOS.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-400">Objetivo</label>
-              <select name="objetivo" value={form.objetivo} onChange={handleChange} className="input mt-1">
-                <option value="Vender">Vender</option>
-                <option value="Dar a conocer la marca">Marca</option>
-                <option value="Educar">Educar</option>
-                <option value="Entretener">Entretener</option>
+              <label className="text-xs font-semibold text-slate-400">Tono</label>
+              <select name="tono" value={form.tono} onChange={handleChange} className="input mt-1">
+                {TONOS.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-400">Objetivo del Video</label>
+            <select name="objetivo" value={form.objetivo} onChange={handleChange} className="input mt-1">
+              <option value="Vender">Vender</option>
+              <option value="Dar a conocer la marca">Marca</option>
+              <option value="Educar">Educar</option>
+              <option value="Entretener">Entretener</option>
+            </select>
           </div>
 
           <div>
             <label className="text-xs font-semibold text-slate-400">Tema Central</label>
-            <textarea name="tema" required rows="2" value={form.tema} onChange={handleChange} className="input mt-1" placeholder="Ej. El error del corte de pelo"></textarea>
+            <textarea name="tema" required rows="2" value={form.tema} onChange={handleChange} className="input mt-1" placeholder={`Ej. ${placeholders.tema}`}></textarea>
           </div>
 
           <div>
             <label className="text-xs font-semibold text-slate-400">Público Objetivo</label>
-            <input type="text" name="publico" value={form.publico} onChange={handleChange} className="input mt-1" placeholder="Ej. Jóvenes de 18 a 25 años" />
+            <input type="text" name="publico" value={form.publico} onChange={handleChange} className="input mt-1" placeholder={`Ej. ${placeholders.publico}`} />
           </div>
 
           <div>
             <label className="text-xs font-semibold text-slate-400">Puntos Clave (Separados por comas)</label>
-            <textarea name="puntos_clave" rows="2" value={form.puntos_clave} onChange={handleChange} className="input mt-1" placeholder="Ej. Mencionar descuento, resaltar calidad"></textarea>
+            <textarea name="puntos_clave" rows="2" value={form.puntos_clave} onChange={handleChange} className="input mt-1" placeholder={`Ej. ${placeholders.puntos}`}></textarea>
           </div>
 
           <button type="submit" disabled={loading} className="btn-primary mt-4">
@@ -106,7 +138,7 @@ export default function App() {
           <div className="mt-6 p-4 border border-emerald-500/30 rounded-xl bg-emerald-900/20">
             <h3 className="text-sm font-bold text-emerald-400 mb-2">✅ Video en proceso</h3>
             <p className="text-xs text-slate-300">Título: {video.titulo}</p>
-            <p className="text-xs text-slate-400 mt-2">El video está siendo renderizado con los nuevos parámetros. Revisa tu Telegram en unos minutos.</p>
+            <p className="text-xs text-slate-400 mt-2">Revisa tu Telegram en unos minutos.</p>
           </div>
         )}
       </main>
