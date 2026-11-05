@@ -10,7 +10,6 @@ log = logging.getLogger("nexus.main")
 
 app = FastAPI(title="Nexus Studio API // Producción")
 
-# --- CORS PARA VERCEL ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -25,6 +24,9 @@ class FrontendRequest(BaseModel):
     nicho: str
     tono: Optional[str] = "Divertido"
     tema: str
+    publico: Optional[str] = ""
+    puntos_clave: Optional[str] = ""
+    objetivo: Optional[str] = "Vender"
 
 @app.get("/")
 @app.get("/api/health")
@@ -33,12 +35,11 @@ async def health():
 
 @app.post("/api/generar")
 async def generar_desde_web(request: FrontendRequest, background_tasks: BackgroundTasks):
-    log.info(f"[WEB] Petición recibida de: {request.negocio} | Tema: {request.tema}")
+    log.info(f"[WEB] Petición de: {request.negocio} | Tema: {request.tema}")
     
-    # Adaptamos el tema para que la IA sepa que es para un negocio
-    tema_adaptado = f"{request.tema} (Enfocado para el negocio: {request.negocio})"
+    # Construimos un tema mucho más rico para la IA
+    tema_adaptado = f"{request.tema}. Público objetivo: {request.publico}. Puntos clave: {request.puntos_clave}. Objetivo: {request.objetivo}"
     
-    # Ejecutamos la generación de guion y el disparo a GitHub en segundo plano
     background_tasks.add_task(procesar_video_async, tema_adaptado, request.nicho, "normal")
     
     return {
