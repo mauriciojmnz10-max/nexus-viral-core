@@ -36,11 +36,13 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
     Actúa como un Director de Cine y Guionista Viral Senior.
     Datos: {tema}
     
-    REGLAS DEL TEXTO:
+    REGLAS DEL TEXTO (CRÍTICO):
     - Menciona el nombre del negocio.
     - Tono: {nicho}.
-    - Gancho de 3 segundos ultra-adictivo.
-    - Máximo 15 palabras por escena.
+    - Genera EXACTAMENTE 25 escenas para asegurar una duración de 60 segundos o más.
+    - Escena 1: Gancho de 3 segundos ultra-adictivo.
+    - Escenas 2 a 20: Desarrollo del tema (entre 15 y 20 palabras por escena).
+    - Escenas 21 a 25: Llamado a la acción (CTA) MUY FUERTE. Pide explícitamente dar like, comentar, compartir y suscribirse/seguir para más contenido.
 
     REGLAS VISUALES (CRÍTICO):
     Para el campo "visual", escribe SOLO 1 PALABRA EN INGLÉS que represente el objeto físico principal de la escena.
@@ -68,7 +70,7 @@ def _generar_guion_sync(tema: str, nicho: str, modo: str):
     }
     
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=45)
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
         content = content.replace("```json", "").replace("```", "").strip()
