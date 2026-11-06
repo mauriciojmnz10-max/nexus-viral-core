@@ -27,11 +27,19 @@ jobs:
 
       - name: Run Render Script
         env:
+          # Payload desde Render
           SCENES_JSON: ${{ toJson(github.event.client_payload.scenes) }}
           METADATA_JSON: ${{ toJson(github.event.client_payload.metadata) }}
+          
+          # Credenciales base (Telegram y Pixabay de respaldo)
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          # AQUÍ PASAMOS LA VARIABLE DE PREZZY
+          
+          # Motor de Video IA (Prezzy) - Se queda por si acaso
           PREZZY_BASE_URL: ${{ secrets.PREZZY_BASE_URL }}
+          
+          # NUEVO Motor de Imagen IA (FLUX) - El que usaremos ahora
+          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          
         run: python render_worker.py
