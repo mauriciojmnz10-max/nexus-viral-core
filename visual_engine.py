@@ -9,10 +9,12 @@ import subprocess
 log = logging.getLogger("nexus.visual")
 
 HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY", "").strip()
-HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+# URL ACTUALIZADA AL NUEVO ROUTER DE HUGGING FACE
+HF_URL = "https://router.huggingface.co/v1/images/generations"
+HF_MODEL = "black-forest-labs/FLUX.1-schnell"
 
 def generar_imagen_ia(prompt: str, output_path: str) -> bool:
-    """Genera una imagen hiperrealista usando FLUX a través de Hugging Face."""
+    """Genera una imagen hiperrealista usando FLUX a través del nuevo Router de Hugging Face."""
     if not HF_TOKEN:
         log.warning("⚠️ HUGGINGFACE_API_KEY no configurada. Saltando generación IA.")
         return False
@@ -21,7 +23,12 @@ def generar_imagen_ia(prompt: str, output_path: str) -> bool:
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json"
     }
-    payload = {"inputs": prompt}
+    # La nueva API de imágenes usa un payload con 'model' y 'prompt'
+    payload = {
+        "model": HF_MODEL,
+        "prompt": prompt,
+        "response_format": "b64_json"  # Pedimos la imagen en base64 para descargarla
+    }
 
     # Intentamos hasta 3 veces (por si el modelo está cargando)
     for intento in range(3):
@@ -30,16 +37,24 @@ def generar_imagen_ia(prompt: str, output_path: str) -> bool:
             r = requests.post(HF_URL, headers=headers, json=payload, timeout=60)
             
             if r.status_code == 200:
-                with open(output_path, "wb") as f:
-                    f.write(r.content)
-                log.info(f"✅ Imagen IA generada exitosamente.")
-                return True
+                data = r.json()
+                # La nueva API devuelve la imagen en un array de 'data'
+                image_b64 = data.get("data", [{}])[0].get("b64_json")
+                if image_b64:
+                    import base64
+                    with open(output_path, "wb") as f:
+                        f.write(base64.b64decode(image_b64))
+                    log.info(f"✅ Imagen IA generada exitosamente.")
+                    return True
+                else:
+                    log.error(f"❌ Hugging Face no devolvió la imagen esperada: {data}")
+                    return False
             
             elif r.status_code == 503:
                 log.warning("⏳ Modelo FLUX cargando. Esperando 10 segundos...")
                 time.sleep(10)
             else:
-                log.error(f"❌ Hugging Face falló: {r.status_code} - {r.text[:100]}")
+                log.error(f"❌ Hugging Face falló: {r.status_code} - {r.text[:150]}")
                 return False
         except Exception as e:
             log.error(f"❌ Excepción en Hugging Face: {e}")
