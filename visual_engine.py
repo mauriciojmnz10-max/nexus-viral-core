@@ -8,59 +8,43 @@ import subprocess
 
 log = logging.getLogger("nexus.visual")
 
-HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY", "").strip()
-# URL ACTUALIZADA AL NUEVO ROUTER DE HUGGING FACE
-HF_URL = "https://router.huggingface.co/v1/images/generations"
-HF_MODEL = "black-forest-labs/FLUX.1-schnell"
-
-def generar_imagen_ia(prompt: str, output_path: str) -> bool:
-    """Genera una imagen hiperrealista usando FLUX a través del nuevo Router de Hugging Face."""
-    if not HF_TOKEN:
-        log.warning("⚠️ HUGGINGFACE_API_KEY no configurada. Saltando generación IA.")
-        return False
-
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    # La nueva API de imágenes usa un payload con 'model' y 'prompt'
-    payload = {
-        "model": HF_MODEL,
-        "prompt": prompt,
-        "response_format": "b64_json"  # Pedimos la imagen en base64 para descargarla
-    }
-
-    # Intentamos hasta 3 veces (por si el modelo está cargando)
-    for intento in range(3):
-        try:
-            log.info(f"🖼️ Pidiendo imagen a FLUX (Intento {intento+1}): {prompt[:40]}...")
-            r = requests.post(HF_URL, headers=headers, json=payload, timeout=60)
-            
-            if r.status_code == 200:
-                data = r.json()
-                # La nueva API devuelve la imagen en un array de 'data'
-                image_b64 = data.get("data", [{}])[0].get("b64_json")
-                if image_b64:
-                    import base64
-                    with open(output_path, "wb") as f:
-                        f.write(base64.b64decode(image_b64))
-                    log.info(f"✅ Imagen IA generada exitosamente.")
-                    return True
-                else:
-                    log.error(f"❌ Hugging Face no devolvió la imagen esperada: {data}")
-                    return False
-            
-            elif r.status_code == 503:
-                log.warning("⏳ Modelo FLUX cargando. Esperando 10 segundos...")
-                time.sleep(10)
-            else:
-                log.error(f"❌ Hugging Face falló: {r.status_code} - {r.text[:150]}")
-                return False
-        except Exception as e:
-            log.error(f"❌ Excepción en Hugging Face: {e}")
+def generar_imagen_pollinations(prompt: str, output_path: str) -> bool:
+    """Genera una imagen usando Pollinations.ai con pausas para evitar el error 402."""
+    try:
+        encoded_prompt = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&model=flux&nologo=true"
+        
+        log.info(f"🖼️ Pidiendo imagen a Pollinations: {prompt[:40]}...")
+        # Timeout más largo porque a veces el servidor tarda
+        r = requests.get(url, timeout=90)
+        
+        if r.status_code == 200:
+            with open(output_path, "wb") as f:
+                f.write(r.content)
+            log.info(f"✅ Imagen generada con Pollinations exitosamente.")
+            return True
+        elif r.status_code == 402:
+            log.warning("⚠️ Pollinations nos pidió esperar (402). Reintentando en 5s...")
             time.sleep(5)
-
-    return False
+            r = requests.get(url, timeout=90)
+            if r.status_code == 200:
+                with open(output_path, "wb") as f:
+                    f.write(r.content)
+                log.info(f"✅ Imagen generada en el reintento.")
+                return True
+            else:
+                log.error(f"❌ Pollinations falló de nuevo: {r.status_code}")
+                return False
+        else:
+            log.error(f"❌ Pollinations falló: {r.status_code}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        log.error("❌ Pollinations excedió el tiempo de espera (90s).")
+        return False
+    except Exception as e:
+        log.error(f"❌ Excepción en Pollinations: {e}")
+        return False
 
 def procesar_imagen_a_video(img_path, output_video, duracion):
     """Aplica el efecto cinematográfico Ken Burns (Zoom) a la imagen generada."""
@@ -82,13 +66,17 @@ def procesar_imagen_a_video(img_path, output_video, duracion):
 def obtener_clip_visual(prompt: str, work_dir: str, duracion: float) -> tuple:
     """
     Motor Visual:
-    1. Genera Imagen IA (FLUX)
+    1. Genera Imagen IA (Pollinations)
     2. Le aplica zoom (Ken Burns)
     3. Retorna None si falla (para que el render use Pixabay)
     """
     # Intentamos generar la imagen IA
     img_path = os.path.join(work_dir, f"ai_img_{uuid.uuid4().hex}.jpg")
-    if generar_imagen_ia(prompt, img_path):
+    
+    # El "freno de mano": esperamos 2 segundos antes de cada petición
+    time.sleep(2)
+    
+    if generar_imagen_pollinations(prompt, img_path):
         # Aplicar efecto de video a la imagen
         final_video = os.path.join(work_dir, f"ai_img_vid_{uuid.uuid4().hex}.mp4")
         if procesar_imagen_a_video(img_path, final_video, duracion):
